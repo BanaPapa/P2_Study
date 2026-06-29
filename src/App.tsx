@@ -58,11 +58,33 @@ type ModalState =
 const STORE_KEY = "monggle-study-app-v1";
 const SETTINGS_KEY = "monggle-study-settings-v1";
 
+// 하위 카테고리를 가진 노드는 "컨테이너", 없는 노드는 "기록을 담는 끝 노드"다.
+function hasChildren(node: StudyNode): boolean {
+  return (node.children?.length ?? 0) > 0;
+}
+
+// 옛 "기록함(leaf)" 개념 제거 마이그레이션.
+// leaf 노드의 기록을 바로 위 부모 카테고리로 올리고, leaf 노드 자체는 삭제한다.
+// 이미 마이그레이션된 데이터(leaf 없음)에 다시 돌려도 결과가 같다(멱등).
+function stripRecordBooks(nodes: StudyNode[]): StudyNode[] {
+  return nodes.map((node) => {
+    const children = node.children ?? [];
+    const leafKids = children.filter((child) => child.leaf === true);
+    const branchKids = children.filter((child) => child.leaf !== true);
+    const hoisted = leafKids.flatMap((child) => child.entries ?? []);
+    const { leaf: _leaf, ...rest } = node;
+    return {
+      ...rest,
+      entries: [...(node.entries ?? []), ...hoisted],
+      children: stripRecordBooks(branchKids),
+    };
+  });
+}
+
 function countOverflowFolders(nodes: StudyNode[], newMax: number): number {
   let count = 0;
   const walk = (list: StudyNode[], depth: number) => {
     for (const n of list) {
-      if (n.leaf) continue;
       if (depth > newMax) { count++; continue; }
       walk(n.children ?? [], depth + 1);
     }
@@ -74,8 +96,7 @@ function countOverflowFolders(nodes: StudyNode[], newMax: number): number {
 function migrateDepthReduction(nodes: StudyNode[], newMax: number): StudyNode[] {
   const orphans: StudyNode[] = [];
   const prune = (list: StudyNode[], depth: number): StudyNode[] =>
-    list.map((node) => {
-      if (node.leaf) return node;
+    list.map((node): StudyNode | null => {
       if (depth > newMax) { orphans.push(structuredClone(node) as StudyNode); return null; }
       return { ...node, children: prune(node.children ?? [], depth + 1) };
     }).filter((n): n is StudyNode => n !== null);
@@ -541,7 +562,7 @@ function loadSettings() {
   }
 }
 
-const bootData = loadData();
+const bootData = stripRecordBooks(loadData());
 
 function findNode(nodes: StudyNode[], nodeId?: string): { node: StudyNode; parent?: StudyNode; list: StudyNode[] } | null {
   if (!nodeId) return null;
@@ -565,12 +586,11 @@ function pathTo(nodes: StudyNode[], nodeId?: string, trail: StudyNode[] = []): S
 }
 
 function countEntries(node: StudyNode): number {
-  if (node.leaf) return node.entries?.length ?? 0;
-  return (node.children ?? []).reduce((sum, child) => sum + countEntries(child), 0);
+  return (node.entries?.length ?? 0) + (node.children ?? []).reduce((sum, child) => sum + countEntries(child), 0);
 }
 
 function countLeaves(node: StudyNode): { done: number; total: number } {
-  if (node.leaf) return { done: node.entries?.length ? 1 : 0, total: 1 };
+  if (!hasChildren(node)) return { done: node.entries?.length ? 1 : 0, total: 1 };
   return (node.children ?? []).reduce(
     (acc, child) => {
       const next = countLeaves(child);
@@ -590,10 +610,9 @@ function depthOf(nodes: StudyNode[], nodeId?: string, depth = 1): number {
   return 0;
 }
 
-// node 를 base 깊이에 두었을 때, 그 하위 트리에서 가장 깊은 "분류(폴더)"의 깊이를 구한다.
-// 기록함(leaf)은 깊이 제한을 받지 않으므로 base-1 을 돌려준다(자기 자신은 분류가 아님).
+// node 를 base 깊이에 두었을 때, 그 하위 트리에서 가장 깊은 카테고리의 깊이를 구한다.
+// 기록(entry)은 노드를 만들지 않으므로 깊이에 영향을 주지 않는다.
 function maxCategoryDepth(node: StudyNode, base: number): number {
-  if (node.leaf) return base - 1;
   let max = base;
   for (const child of node.children ?? []) {
     max = Math.max(max, maxCategoryDepth(child, base + 1));
@@ -601,21 +620,27 @@ function maxCategoryDepth(node: StudyNode, base: number): number {
   return max;
 }
 
+// 기록을 담는 "끝 노드"(하위 카테고리가 없는 노드) 목록.
 function allLeaves(nodes: StudyNode[]): StudyNode[] {
-  return nodes.flatMap((node) => node.leaf ? [node] : allLeaves(node.children ?? []));
+  return nodes.flatMap((node) => hasChildren(node) ? allLeaves(node.children ?? []) : [node]);
 }
 
-function allEntries(nodes: StudyNode[]) {
-  return allLeaves(nodes).flatMap((node) => (node.entries ?? []).map((entry) => ({ node, entry })));
+function allEntries(nodes: StudyNode[]): { node: StudyNode; entry: StudyEntry }[] {
+  return nodes.flatMap((node) => [
+    ...(node.entries ?? []).map((entry) => ({ node, entry })),
+    ...allEntries(node.children ?? []),
+  ]);
 }
 
 function entriesForNode(node: StudyNode): { node: StudyNode; entry: StudyEntry }[] {
-  if (node.leaf) return (node.entries ?? []).map((entry) => ({ node, entry }));
-  return (node.children ?? []).flatMap(entriesForNode);
+  return [
+    ...(node.entries ?? []).map((entry) => ({ node, entry })),
+    ...(node.children ?? []).flatMap(entriesForNode),
+  ];
 }
 
 function folderInsights(node: StudyNode) {
-  const leaves = node.leaf ? [node] : allLeaves(node.children ?? []);
+  const leaves = hasChildren(node) ? allLeaves(node.children ?? []) : [node];
   const entries = entriesForNode(node);
   const latest = [...entries].sort((a, b) => b.entry.date.localeCompare(a.entry.date))[0];
   const emptyLeaves = leaves.filter((leaf) => !leaf.entries?.length);
@@ -722,7 +747,7 @@ function App() {
     if (serverData === null) return;
     if (serverData === lastSavedRef.current) return;
     lastSavedRef.current = serverData;
-    setNodes(JSON.parse(serverData) as StudyNode[]);
+    setNodes(stripRecordBooks(JSON.parse(serverData) as StudyNode[]));
   }, [serverData, isAuthenticated]);
 
   // local → Convex: 변경사항을 즉시 저장
@@ -794,9 +819,9 @@ function App() {
       const clone = structuredClone(prev) as StudyNode[];
       const walk = (list: StudyNode[]) => {
         for (const n of list) {
-          if (!n.leaf) {
+          if (hasChildren(n)) {
             n.open = open;
-            if (n.children) walk(n.children);
+            walk(n.children!);
           }
         }
       };
@@ -826,9 +851,8 @@ function App() {
     const nextName = name.trim();
     if (!nextName) return;
     const newId = id("n");
-    const node: StudyNode = leaf
-      ? { id: newId, name: nextName, emoji, leaf: true, entries: initialEntry ? [initialEntry] : [] }
-      : { id: newId, name: nextName, emoji, children: [] };
+    // 모든 새 노드는 카테고리다. 하위가 없으면 그 자체가 기록을 담는 끝 노드가 된다.
+    const node: StudyNode = { id: newId, name: nextName, emoji, children: [], entries: initialEntry ? [initialEntry] : [] };
     setNodes((prev) => cloneUpdate(prev, (draft) => {
       if (!parentId) {
         node.colorIndex = draft.length % palette.length;
@@ -849,7 +873,7 @@ function App() {
         burst(r.left + r.width / 2, r.top + r.height / 2);
       }
     }, 60);
-    say(leaf ? "학습 기록함 추가! 📘" : "새 분류 추가! 📁");
+    say("새 분류 추가! 📁");
   }
 
   function saveEntry(nodeId: string, saved: StudyEntry) {
@@ -884,8 +908,7 @@ function App() {
     if (!dId || !dInfo || dId === dInfo.id) return;
     const { id: targetId, position } = dInfo;
 
-    // 깊이 제한 검사: 현재 maxDepth 설정보다 깊은 위치에는 분류(폴더)를 둘 수 없다.
-    // 기록함은 어디든 가능하지만, 분류는 maxDepth 이하 깊이에만 놓일 수 있다.
+    // 깊이 제한 검사: 현재 maxDepth 설정보다 깊은 위치에는 분류를 둘 수 없다.
     const dragging = findNode(nodes, dId)?.node;
     const targetDepth = depthOf(nodes, targetId);
     if (dragging && targetDepth) {
@@ -894,7 +917,7 @@ function App() {
         dragRef.current = {};
         setDragId(undefined);
         setDropInfo(undefined);
-        say(`${settings.maxDepth}단계 설정이라 여기엔 분류를 둘 수 없어요. 기록함만 가능해요 📏`);
+        say(`${settings.maxDepth}단계 설정이라 여기엔 더 깊은 분류를 둘 수 없어요 📏`);
         return;
       }
     }
@@ -907,7 +930,7 @@ function App() {
       dragResult.list.splice(dragIdx, 1);
       const targetResult = findNode(draft, targetId);
       if (!targetResult) return;
-      if (position === "inside" && !targetResult.node.leaf) {
+      if (position === "inside" && !(targetResult.node.entries?.length)) {
         targetResult.node.children = targetResult.node.children ?? [];
         targetResult.node.children.push(dragNode);
         targetResult.node.open = true;
@@ -924,10 +947,8 @@ function App() {
   }
 
   function openAddFor(parentId?: string) {
-    const depth = depthOf(nodes, parentId);
-    const leaf = Boolean(parentId && depth >= settings.maxDepth);
-    setDraftEmoji(leaf ? "📘" : "📁");
-    setModal({ kind: "category", parentId, leaf });
+    setDraftEmoji("📁");
+    setModal({ kind: "category", parentId, leaf: false });
   }
 
   function handleMaxDepthChange(newMax: 2 | 3 | 4) {
@@ -992,7 +1013,7 @@ function App() {
               onSelect={(node) => {
                 setView("tree");
                 setSelectedId(node.id);
-                if (!node.leaf) updateNode(node.id, (item) => { item.open = true; });
+                if (hasChildren(node)) updateNode(node.id, (item) => { item.open = true; });
               }}
               onToggle={toggleNode}
               onRename={renameNode}
@@ -1108,7 +1129,7 @@ function App() {
           onPick={(emoji) => {
             if (modal.draftTarget === "category") {
               setDraftEmoji(emoji);
-              setModal({ kind: "category", leaf: true });
+              setModal({ kind: "category", leaf: false });
             } else if (modal.nodeId) {
               updateNode(modal.nodeId, (node) => { node.emoji = emoji; });
               setModal(null);
@@ -1229,14 +1250,11 @@ function NavAddButton({ selected, nodes, maxDepth, onAddRoot, onAddChild, onAddE
   onAddChild: (nodeId: string) => void;
   onAddEntry: (nodeId: string) => void;
 }) {
-  const depth = selected ? depthOf(nodes, selected.id) : 0;
   const label = !selected
     ? "대분류 추가"
-    : selected.leaf
-      ? "기록 추가"
-      : depth >= maxDepth
-        ? "기록함 추가"
-        : "하위 분류 추가";
+    : hasChildren(selected)
+      ? "하위 분류 추가"
+      : "새 기록 추가";
   return (
     <button
       className="nav-add-button"
@@ -1245,8 +1263,8 @@ function NavAddButton({ selected, nodes, maxDepth, onAddRoot, onAddChild, onAddE
       onClick={(event) => {
         event.stopPropagation();
         if (!selected) onAddRoot();
-        else if (selected.leaf) onAddEntry(selected.id);
-        else onAddChild(selected.id);
+        else if (hasChildren(selected)) onAddChild(selected.id);
+        else onAddEntry(selected.id);
       }}
     >
       <span>＋</span>
@@ -1304,7 +1322,8 @@ function TreeNode(props: {
           e.stopPropagation();
           const rect = e.currentTarget.getBoundingClientRect();
           const pct = (e.clientY - rect.top) / rect.height;
-          const position = pct < 0.3 ? "before" : pct > 0.7 ? "after" : node.leaf ? (pct < 0.5 ? "before" : "after") : "inside";
+          const canNest = !(node.entries?.length);
+          const position = pct < 0.3 ? "before" : pct > 0.7 ? "after" : canNest ? "inside" : (pct < 0.5 ? "before" : "after");
           props.onDragOver(node.id, position);
         }}
         onDrop={(e) => { e.preventDefault(); e.stopPropagation(); props.onDrop(e.clientX, e.clientY); }}
@@ -1351,8 +1370,8 @@ function TreeNode(props: {
       </div>
       {menu && (
         <div className="node-menu" style={{ borderColor: soft }} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-          {!node.leaf && <button onClick={() => { props.onAdd(node.id); closeMenu(); }}>＋ {depthOf(nodes, node.id) >= maxDepth ? "기록함 추가" : "하위 추가"}</button>}
-          {node.leaf && <button onClick={() => { props.onAddEntry(node.id); closeMenu(); }}>📝 기록 추가</button>}
+          {depthOf(nodes, node.id) < maxDepth && !(node.entries?.length) && <button onClick={() => { props.onAdd(node.id); closeMenu(); }}>＋ 하위 분류 추가</button>}
+          {!hasKids && <button onClick={() => { props.onAddEntry(node.id); closeMenu(); }}>📝 새 기록 추가</button>}
           <button className="danger" onClick={() => { props.onDelete(node.id); closeMenu(); }}>🗑️ 삭제</button>
         </div>
       )}
@@ -1379,7 +1398,10 @@ function DetailView({ node, nodes, maxDepth, onSelect, onAdd, onAddEntry, onEdit
   const [dot, soft] = palette[colorIndexFor(nodes, node.id) % palette.length];
   const crumbs = pathTo(nodes, node.id);
 
-  if (node.leaf) {
+  const depth = depthOf(nodes, node.id);
+  const canAddSub = depth < maxDepth;
+
+  if (!hasChildren(node)) {
     const entries = [...(node.entries ?? [])].sort((a, b) => b.date.localeCompare(a.date));
     const grouped = entries.reduce<Record<string, StudyEntry[]>>((acc, entry) => {
       acc[entry.date] = acc[entry.date] ?? [];
@@ -1397,12 +1419,17 @@ function DetailView({ node, nodes, maxDepth, onSelect, onAdd, onAddEntry, onEdit
           title={node.name}
           subtitle="날짜별 학습 기록"
           onEmoji={() => onEmoji(node.id)}
-          action={<button className="btn btn-primary" onClick={() => onAddEntry(node.id)}>＋ 새 기록 추가</button>}
+          action={
+            <>
+              {canAddSub && entries.length === 0 && <button className="btn" onClick={() => onAdd(node.id)}>＋ 하위 분류</button>}
+              <button className="btn btn-primary" onClick={() => onAddEntry(node.id)}>＋ 새 기록 추가</button>
+            </>
+          }
         />
         <div className="stats">
           <Stat label="🎯 오늘의 초점" value={node.name} color={dot} compact />
           <Stat label="⏱ 최근 멈춘 곳" value={latest ? `${relDay(latest.date)} · ${latest.title}` : "아직 없음"} color="var(--mint)" compact />
-          <Stat label="🌱 비어있는 기록함" value={emptyState} color="var(--peach)" compact />
+          <Stat label="🌱 기록 상태" value={emptyState} color="var(--peach)" compact />
           <Stat label="✏️ 다음 한 줄" value={latest ? "오늘 배운 것" : "첫 기록 남기기"} color="var(--sky)" compact />
         </div>
         {entries.length ? (
@@ -1432,36 +1459,35 @@ function DetailView({ node, nodes, maxDepth, onSelect, onAdd, onAddEntry, onEdit
         title={node.name}
         subtitle="이 카테고리에서 공부한 내용을 한눈에"
         onEmoji={() => onEmoji(node.id)}
-        action={<button className="btn btn-primary" onClick={() => onAdd(node.id)}>＋ {depthOf(nodes, node.id) >= maxDepth ? "학습 기록함 추가" : "새 분류 추가"}</button>}
+        action={canAddSub ? <button className="btn btn-primary" onClick={() => onAdd(node.id)}>＋ 새 분류 추가</button> : undefined}
       />
       <div className="stats">
         <Stat label="🎯 오늘의 초점" value={insights.focus} color={dot} compact />
         <Stat label="⏱ 최근 멈춘 곳" value={insights.pausedAt} color="var(--mint)" compact />
-        <Stat label="🌱 비어있는 기록함" value={insights.empty} color="var(--peach)" compact />
+        <Stat label="🌱 비어있는 분류" value={insights.empty} color="var(--peach)" compact />
         <Stat label="✏️ 다음 한 줄" value={insights.nextLine} color="var(--sky)" compact />
       </div>
       <h2 className="section-title">하위 항목</h2>
-      {children.length ? (
-        <div className="grid-cards">
-          {children.map((child) => {
-            const [cdot, csoft] = palette[colorIndexFor(nodes, child.id) % palette.length];
-            const childLeaves = countLeaves(child);
-            const childPct = childLeaves.total ? Math.round((childLeaves.done / childLeaves.total) * 100) : 0;
-            return (
-              <button className="cat-card" key={child.id} onClick={() => onSelect(child.id)}>
-                <div className="top">
-                  <div className="ic" style={{ background: csoft }}>{child.emoji}</div>
-                  <div><h4>{child.name}</h4><span>{child.leaf ? "학습 기록함" : `${child.children?.length ?? 0}개 하위`}</span></div>
-                </div>
-                <div className="ring-row">
-                  <div className="ring" style={{ "--p": childPct, "--rc": cdot } as CSSProperties}><b>{childPct}%</b></div>
-                  <div className="meta"><b>{countEntries(child)}</b>개 기록<br />{child.leaf ? "기록 상세 보기" : "카테고리 그룹"}</div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      ) : <EmptyState title="비어있는 카테고리예요" body="버튼으로 하위 카테고리나 기록함을 추가해보세요" emoji="📂" />}
+      <div className="grid-cards">
+        {children.map((child) => {
+          const [cdot, csoft] = palette[colorIndexFor(nodes, child.id) % palette.length];
+          const childLeaves = countLeaves(child);
+          const childPct = childLeaves.total ? Math.round((childLeaves.done / childLeaves.total) * 100) : 0;
+          const childIsCategory = hasChildren(child);
+          return (
+            <button className="cat-card" key={child.id} onClick={() => onSelect(child.id)}>
+              <div className="top">
+                <div className="ic" style={{ background: csoft }}>{child.emoji}</div>
+                <div><h4>{child.name}</h4><span>{childIsCategory ? `${child.children?.length ?? 0}개 하위` : "기록 보관"}</span></div>
+              </div>
+              <div className="ring-row">
+                <div className="ring" style={{ "--p": childPct, "--rc": cdot } as CSSProperties}><b>{childPct}%</b></div>
+                <div className="meta"><b>{countEntries(child)}</b>개 기록<br />{childIsCategory ? "카테고리 그룹" : "기록 상세 보기"}</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </>
   );
 }
@@ -1572,7 +1598,7 @@ function StatsView({ nodes, searchTag }: { nodes: StudyNode[]; searchTag: (tag: 
     <>
       <PageHead crumbs={[]} emoji="📊" soft="var(--accent-soft)" title="학습 통계" subtitle="카테고리·태그·기록 추이를 한눈에" onEmoji={() => {}} />
       <div className="stats">
-        <Stat label="📚 전체 기록함" value={leaves.length} suffix="개" color="var(--accent)" />
+        <Stat label="📚 기록 칸" value={leaves.length} suffix="개" color="var(--accent)" />
         <Stat label="📝 전체 기록" value={entries.length} suffix="개" color="var(--mint)" />
         <Stat label="🏷️ 사용중인 태그" value={Object.keys(tagCounts).length} suffix="개" color="var(--peach)" />
         <Stat label="🔥 연속 기록" value="7" suffix="일" color="var(--sky)" />
@@ -1717,7 +1743,7 @@ function MobileShell(props: {
   };
 
   const openNode = (node: StudyNode) => {
-    if (node.leaf) goTo("leaf", node.id);
+    if (!hasChildren(node)) goTo("leaf", node.id);
     else {
       props.onToggle(node.id);
       props.setRoute("home");
@@ -1725,7 +1751,7 @@ function MobileShell(props: {
   };
 
   const openFolderCard = (node: StudyNode) => {
-    goTo(node.leaf ? "leaf" : "folder", node.id);
+    goTo(hasChildren(node) ? "folder" : "leaf", node.id);
   };
 
   const openCtxNode = (nodeId: string) => {
@@ -1740,10 +1766,10 @@ function MobileShell(props: {
     setSheet("ctx");
   };
 
-  const openAddSheet = (parentId?: string, leaf = false) => {
+  const openAddSheet = (parentId?: string) => {
     setAddParentId(parentId);
-    setAddLeaf(leaf);
-    setAddEmoji(leaf ? "📘" : "📁");
+    setAddLeaf(false);
+    setAddEmoji("📁");
     setAddName("");
     setAddEntryTitle("");
     setAddEntryDate(todayISO());
@@ -1845,7 +1871,7 @@ function MobileShell(props: {
           <div><h2>학습 통계</h2><p>카테고리·태그·기록 추이</p></div>
         </div>
         <div className="statline">
-          <div className="s"><b>{allLeaves(props.nodes).length}</b><span>기록함</span></div>
+          <div className="s"><b>{allLeaves(props.nodes).length}</b><span>기록 칸</span></div>
           <div className="s"><b>{allEntries(props.nodes).length}</b><span>총 기록</span></div>
           <div className="s"><b>7</b><span>연속 기록</span></div>
         </div>
@@ -1877,7 +1903,7 @@ function MobileShell(props: {
         </div>
       </div>
     );
-  } else if (selected && (props.route === "folder" || (!selected.leaf && props.route !== "leaf"))) {
+  } else if (selected && (props.route === "folder" || (hasChildren(selected) && props.route !== "leaf"))) {
     content = <MobileFolder node={selected} nodes={props.nodes} maxDepth={props.maxDepth} onBack={goBack} openFolderCard={openFolderCard} openAddSheet={openAddSheet} openCtxNode={openCtxNode} longPress={longPress} />;
   } else if (selected && props.route === "leaf") {
     content = <MobileLeaf node={selected} nodes={props.nodes} onBack={goBack} openEntrySheet={openEntrySheet} openCtxEntry={openCtxEntry} longPress={longPress} />;
@@ -1913,12 +1939,17 @@ function MobileShell(props: {
           <div className={`sheet ${sheet === "ctx" ? "show" : ""}`}>
             <div className="handle" />
             <div className="ctx-title">{ctxEntry ? ctxEntry.title : ctxNode ? `${ctxNode.emoji} ${ctxNode.name}` : ""}</div>
-            {!ctxEntry && ctxNode && (
+            {!ctxEntry && ctxNode && depthOf(props.nodes, ctxNode.id) < props.maxDepth && !(ctxNode.entries?.length) && (
               <button className="ctx-btn" onClick={() => {
                 setSheet(null);
-                if (ctxNode.leaf) openEntrySheet(ctxNode.id);
-                else openAddSheet(ctxNode.id, depthOf(props.nodes, ctxNode.id) >= props.maxDepth);
-              }}><PlusIcon /><span>{ctxNode.leaf ? "새 기록 추가" : depthOf(props.nodes, ctxNode.id) < props.maxDepth ? "새 분류 추가" : "새 학습 기록함 추가"}</span></button>
+                openAddSheet(ctxNode.id);
+              }}><PlusIcon /><span>새 분류 추가</span></button>
+            )}
+            {!ctxEntry && ctxNode && !hasChildren(ctxNode) && (
+              <button className="ctx-btn" onClick={() => {
+                setSheet(null);
+                openEntrySheet(ctxNode.id);
+              }}><PlusIcon /><span>새 기록 추가</span></button>
             )}
             {!ctxEntry && ctxNode && <button className="ctx-btn" onClick={() => {
               const next = window.prompt("새 이름", ctxNode.name);
@@ -1939,7 +1970,7 @@ function MobileShell(props: {
               <button className="em" onClick={() => setSheet("emoji")}>{addEmoji}</button>
               <input value={addName} onChange={(event) => setAddName(event.target.value)} placeholder="이름을 입력하세요…" />
             </div>
-            <div className="add-hint">{addParentId ? addLeaf ? "소분류 학습 기록함을 추가합니다" : "하위 카테고리를 추가합니다" : "새 대분류 카테고리를 추가합니다"}</div>
+            <div className="add-hint">{addParentId ? "하위 분류를 추가합니다" : "새 대분류 카테고리를 추가합니다"}</div>
             {addLeaf && (
               <div className="es-scroll add-leaf-entry">
                 <label className="es-label">첫 기록 제목</label>
@@ -2023,16 +2054,20 @@ function MobileTreeNode({ node, nodes, openNode, openCtxNode, longPress }: {
   longPress: (callback: () => void) => Record<string, () => void>;
 }) {
   const [_, soft] = palette[colorIndexFor(nodes, node.id) % palette.length];
-  const latest = node.leaf && node.entries?.[0] ? `${countEntries(node)}개 기록 · ${relDay(node.entries[0].date)}` : node.leaf ? "기록 없음" : `${node.children?.length ?? 0}개 하위`;
+  const latest = hasChildren(node)
+    ? `${node.children?.length ?? 0}개 하위`
+    : node.entries?.[0]
+      ? `${countEntries(node)}개 기록 · ${relDay(node.entries[0].date)}`
+      : "기록 없음";
   return (
     <div className={`tnode ${node.open ? "open" : ""}`} data-id={node.id}>
       <div className="trow" onClick={() => openNode(node)} {...longPress(() => openCtxNode(node.id))}>
-        <button className="ic" style={{ background: soft }} onClick={(event) => { event.stopPropagation(); openCtxNode(node.id); }}>{node.emoji || (node.leaf ? "📘" : "📁")}</button>
+        <button className="ic" style={{ background: soft }} onClick={(event) => { event.stopPropagation(); openCtxNode(node.id); }}>{node.emoji || (hasChildren(node) ? "📁" : "📘")}</button>
         <div className="tx"><h4>{node.name}</h4><p>{latest}</p></div>
         {countEntries(node) ? <span className="cnt">{countEntries(node)}</span> : null}
         <Chev />
       </div>
-      {!node.leaf && node.children?.length ? <div className="tkids">{node.children.map((child) => <MobileTreeNode key={child.id} node={child} nodes={nodes} openNode={openNode} openCtxNode={openCtxNode} longPress={longPress} />)}</div> : null}
+      {hasChildren(node) ? <div className="tkids">{node.children!.map((child) => <MobileTreeNode key={child.id} node={child} nodes={nodes} openNode={openNode} openCtxNode={openCtxNode} longPress={longPress} />)}</div> : null}
     </div>
   );
 }
@@ -2061,17 +2096,17 @@ function MobileFolder({ node, nodes, maxDepth, onBack, openFolderCard, openAddSh
       <div className="statline action-cards">
         <div className="s"><b>{insights.focus}</b><span>오늘의 초점</span></div>
         <div className="s"><b>{insights.pausedAt}</b><span>최근 멈춘 곳</span></div>
-        <div className="s"><b>{insights.empty}</b><span>비어있는 기록함</span></div>
+        <div className="s"><b>{insights.empty}</b><span>비어있는 분류</span></div>
         <div className="s"><b>{insights.nextLine}</b><span>다음 한 줄</span></div>
       </div>
-      <button className="btn-add-sub" onClick={() => openAddSheet(node.id, depth >= maxDepth)}><PlusIcon />{depth < maxDepth ? "새 분류 추가" : "새 학습 기록함 추가"}</button>
+      {depth < maxDepth && <button className="btn-add-sub" onClick={() => openAddSheet(node.id)}><PlusIcon />새 분류 추가</button>}
       <div className="cat-grid">
         {children.length ? children.map((child) => {
           const [__, childSoft] = palette[colorIndexFor(nodes, child.id) % palette.length];
           return (
             <button className="cat-card" key={child.id} onClick={() => openFolderCard(child)} {...longPress(() => openCtxNode(child.id))}>
               <div className="ic" style={{ background: childSoft }}>{child.emoji}</div>
-              <div className="tx"><h4>{child.name}</h4><p>{child.leaf ? "학습 기록함" : `${child.children?.length ?? 0}개 하위`} · {countEntries(child)}개 기록</p></div>
+              <div className="tx"><h4>{child.name}</h4><p>{hasChildren(child) ? `${child.children?.length ?? 0}개 하위` : "기록 보관"} · {countEntries(child)}개 기록</p></div>
               <Chev />
             </button>
           );
@@ -2107,7 +2142,7 @@ function MobileLeaf({ node, nodes, onBack, openEntrySheet, openCtxEntry, longPre
       <div className="statline action-cards">
         <div className="s"><b>{insights.focus}</b><span>오늘의 초점</span></div>
         <div className="s"><b>{insights.pausedAt}</b><span>최근 멈춘 곳</span></div>
-        <div className="s"><b>{insights.empty}</b><span>비어있는 기록함</span></div>
+        <div className="s"><b>{insights.empty}</b><span>비어있는 분류</span></div>
         <div className="s"><b>{insights.nextLine}</b><span>다음 한 줄</span></div>
       </div>
       {entries.length ? Object.keys(grouped).sort((a, b) => b.localeCompare(a)).map((date) => (
@@ -2479,9 +2514,9 @@ function SettingsPanel({ settings, setSettings, onMaxDepthChange, onClose }: {
               </div>
             </div>
             <p className="sp-depth-hint">
-              {settings.maxDepth === 2 && "대분류 › 소분류 › 기록함"}
-              {settings.maxDepth === 3 && "대분류 › 중분류 › 소분류 › 기록함"}
-              {settings.maxDepth === 4 && "대분류 › 중분류 › 소분류 › 세분류 › 기록함"}
+              {settings.maxDepth === 2 && "대분류 › 소분류 — 소분류에 기록을 남겨요"}
+              {settings.maxDepth === 3 && "대분류 › 중분류 › 소분류 — 소분류에 기록을 남겨요"}
+              {settings.maxDepth === 4 && "대분류 › 중분류 › 소분류 › 세분류 — 세분류에 기록을 남겨요"}
             </p>
           </section>
         </div>
