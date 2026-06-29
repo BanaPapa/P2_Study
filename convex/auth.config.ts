@@ -1,7 +1,7 @@
 export default {
   providers: [
     {
-      domain: process.env.CONVEX_SITE_URL,
+      domain: "https://fearless-hummingbird-403.convex.site",
       applicationID: "convex",
     },
   ],
