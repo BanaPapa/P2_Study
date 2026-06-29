@@ -73,11 +73,29 @@ function stripRecordBooks(nodes: StudyNode[]): StudyNode[] {
     const branchKids = children.filter((child) => child.leaf !== true);
     const hoisted = leafKids.flatMap((child) => child.entries ?? []);
     const { leaf: _leaf, ...rest } = node;
-    return {
-      ...rest,
-      entries: [...(node.entries ?? []), ...hoisted],
-      children: stripRecordBooks(branchKids),
-    };
+    const strippedBranches = stripRecordBooks(branchKids);
+    const allEntries = [...(node.entries ?? []), ...hoisted];
+
+    // 모델 규칙: 노드는 "카테고리(하위 보유)" 또는 "기록 보관(끝 노드)" 중 하나여야 한다.
+    // 하위 카테고리가 있는데 기록까지 생기는 '혼합 노드'는 상세뷰에서 기록이 숨겨지므로,
+    // 올라온 기록을 전용 끝 노드로 분리해 자식으로 둔다(기록이 사라지지 않게).
+    if (strippedBranches.length > 0 && allEntries.length > 0) {
+      return {
+        ...rest,
+        entries: [],
+        children: [
+          ...strippedBranches,
+          {
+            id: `${node.id}::records`,
+            name: `${node.name} 기록`,
+            emoji: node.emoji ?? "📘",
+            children: [],
+            entries: allEntries,
+          },
+        ],
+      };
+    }
+    return { ...rest, entries: allEntries, children: strippedBranches };
   });
 }
 
