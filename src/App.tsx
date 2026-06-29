@@ -7,6 +7,7 @@ import { api } from "../convex/_generated/api";
 type AttachmentType = "doc" | "video" | "link";
 type ThemeName = "lavender" | "ocean" | "forest" | "sunset" | "rose" | "dark" | "dark-ocean" | "dark-forest" | "dark-warm";
 type FontName = "pretendard" | "jua" | "system";
+type SkinName = "monggle" | "minimal" | "retro" | "neon" | "paper" | "jelly" | "glass" | "galaxy" | "terminal" | "watercolor";
 type PreviewMode = "auto" | "mobile";
 type MobileRoute = "home" | "folder" | "leaf" | "stats" | "profile";
 
@@ -38,6 +39,7 @@ type StudyNode = {
 };
 
 type Settings = {
+  skin: SkinName;
   theme: ThemeName;
   font: FontName;
   sidebarWidth: number;
@@ -91,23 +93,55 @@ function stripRecordBooks(nodes: StudyNode[]): StudyNode[] {
   });
 }
 
+// 스킨마다 고유한 "팡!" 파티클. cls 가 CSS(.p-*) 모션을, glyphs/colors 가 모양을 정한다.
+type BurstSpec = {
+  cls: string;
+  glyphs?: string[];
+  colors?: string[];
+  count: number;
+  distMin: number;
+  distMax: number;
+  rise: number;     // dy 보정 (음수=위로, 양수=아래로)
+  delayMax: number; // 애니메이션 시작 지연 최대치(s)
+  life: number;     // 제거 타이밍(ms)
+};
+
+const BURSTS: Record<SkinName, BurstSpec> = {
+  monggle:    { cls: "",        glyphs: ["✨", "🎉", "⭐", "💫", "🌸", "💜"], count: 12, distMin: 40, distMax: 110, rise: -30, delayMax: 0.1,  life: 900 },
+  minimal:    { cls: "p-ring",  count: 4,  distMin: 0,  distMax: 0,   rise: 0,   delayMax: 0.18, life: 700 },
+  retro:      { cls: "p-pixel", colors: ["#ff5277", "#ffd23f", "#1fd1a5", "#3b82f6", "#a855f7"], count: 16, distMin: 30, distMax: 95,  rise: -22, delayMax: 0.06, life: 800 },
+  neon:       { cls: "p-neon",  colors: ["#22d3ee", "#ff2fd0", "#39ff14", "#a855f7"], count: 18, distMin: 46, distMax: 120, rise: -12, delayMax: 0.08, life: 850 },
+  paper:      { cls: "p-paper", colors: ["#e8dcc0", "#d8c8a0", "#f0e6d0", "#cdb892"], count: 11, distMin: 24, distMax: 80,  rise: 40,  delayMax: 0.12, life: 1100 },
+  jelly:      { cls: "p-jelly", glyphs: ["💖", "🍬", "⭐", "🩷", "🫧"], count: 13, distMin: 40, distMax: 104, rise: -30, delayMax: 0.1,  life: 900 },
+  glass:      { cls: "p-bubble", count: 13, distMin: 18, distMax: 70,  rise: -90, delayMax: 0.2,  life: 1200 },
+  galaxy:     { cls: "p-star",  glyphs: ["⭐", "✦", "✨", "🌟", "·"], count: 16, distMin: 30, distMax: 120, rise: -20, delayMax: 0.12, life: 1000 },
+  terminal:   { cls: "p-char",  glyphs: ["0", "1", "<", ">", "{", "}", "/", "$", "#", "*", "%"], colors: ["#39ff14"], count: 14, distMin: 10, distMax: 40, rise: 60, delayMax: 0.15, life: 1000 },
+  watercolor: { cls: "p-blot",  colors: ["#f7a8b8", "#a8d8ea", "#c3f0ca", "#ffe6a7", "#d8b4f0"], count: 9, distMin: 18, distMax: 66, rise: 8, delayMax: 0.12, life: 1100 },
+};
+
 function burst(x: number, y: number) {
   const fx = document.getElementById("burst-fx");
   if (!fx) return;
-  const em = ["✨", "🎉", "⭐", "💫", "🌸", "💜"];
-  for (let i = 0; i < 12; i++) {
+  const skin = (document.documentElement.dataset.skin as SkinName) || "monggle";
+  const spec = BURSTS[skin] ?? BURSTS.monggle;
+  for (let i = 0; i < spec.count; i++) {
     const s = document.createElement("span");
-    s.className = "spark";
-    s.textContent = em[i % em.length];
+    s.className = spec.cls ? `spark ${spec.cls}` : "spark";
+    if (spec.glyphs) s.textContent = spec.glyphs[i % spec.glyphs.length];
+    if (spec.colors) {
+      const c = spec.colors[i % spec.colors.length];
+      s.style.setProperty("--c", c);
+      s.style.color = c;
+    }
     s.style.left = x + "px";
     s.style.top = y + "px";
     const ang = Math.random() * 6.28;
-    const dist = 40 + Math.random() * 70;
+    const dist = spec.distMin + Math.random() * (spec.distMax - spec.distMin);
     s.style.setProperty("--dx", Math.cos(ang) * dist + "px");
-    s.style.setProperty("--dy", Math.sin(ang) * dist - 30 + "px");
-    s.style.animationDelay = Math.random() * 0.1 + "s";
+    s.style.setProperty("--dy", Math.sin(ang) * dist + spec.rise + "px");
+    s.style.animationDelay = Math.random() * spec.delayMax + "s";
     fx.appendChild(s);
-    setTimeout(() => s.remove(), 900);
+    setTimeout(() => s.remove(), spec.life);
   }
 }
 
@@ -133,6 +167,7 @@ const emojis = [
 ];
 
 const defaultSettings: Settings = {
+  skin: "monggle",
   theme: "lavender",
   font: "pretendard",
   sidebarWidth: 300,
@@ -746,6 +781,7 @@ function App() {
   useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
   useEffect(() => {
     const root = document.documentElement;
+    root.dataset.skin = settings.skin;
     root.dataset.theme = settings.theme;
     root.style.setProperty("--sb-w", `${settings.sidebarWidth}px`);
     root.style.setProperty("--nav-font-size", `${settings.navSize}px`);
@@ -2461,6 +2497,34 @@ function SettingsPanel({ settings, setSettings, onClose }: {
             <Range label="제목 크기" value={settings.titleSize} min={20} max={40} onChange={(value) => update("titleSize", value)} />
           </section>
           <section className="sp-section">
+            <h3>스킨</h3>
+            <p className="sp-skin-hint">색·폰트·모서리·효과까지 통째로 바뀌어요. 드래그·클릭 때 터지는 손맛도 스킨마다 달라요 ✨</p>
+            <div className="skin-grid">
+              {([
+                ["monggle",    "몽글",     "💜", "linear-gradient(135deg,#c4b5fd,#f0abfc)"],
+                ["minimal",    "미니멀",   "▫️", "linear-gradient(135deg,#f4f4f5,#6366f1)"],
+                ["retro",      "레트로",   "👾", "linear-gradient(135deg,#ff5277,#ffd23f)"],
+                ["neon",       "네온",     "🌃", "linear-gradient(135deg,#22d3ee,#d946ef)"],
+                ["paper",      "종이",     "📒", "linear-gradient(135deg,#f0e6d0,#c08552)"],
+                ["jelly",      "젤리",     "🍬", "linear-gradient(135deg,#fbcfe8,#f472b6)"],
+                ["glass",      "글래스",   "🫧", "linear-gradient(135deg,#a5f3fc,#818cf8)"],
+                ["galaxy",     "갤럭시",   "🌌", "linear-gradient(135deg,#312e81,#a855f7)"],
+                ["terminal",   "터미널",   "🖥️", "linear-gradient(135deg,#022c22,#39ff14)"],
+                ["watercolor", "수채화",   "🎨", "linear-gradient(135deg,#bbf7d0,#7dd3fc)"],
+              ] as [SkinName, string, string, string][]).map(([s, label, emoji, swatch]) => (
+                <button
+                  className={`skin-btn ${settings.skin === s ? "active" : ""}`}
+                  key={s}
+                  onClick={(e) => { update("skin", s); burst(e.clientX, e.clientY); }}
+                >
+                  <span className="skin-swatch" style={{ background: swatch }}>{emoji}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </section>
+          {settings.skin === "monggle" && (
+          <section className="sp-section">
             <h3>테마 & 색상</h3>
             <div className="sp-theme-group">
               <span className="sp-mode-label">☀️ 라이트</span>
@@ -2504,6 +2568,7 @@ function SettingsPanel({ settings, setSettings, onClose }: {
               </div>
             </div>
           </section>
+          )}
           <section className="sp-section">
             <h3>레이아웃</h3>
             <Range label="사이드바 기본 폭" value={settings.sidebarWidth} min={200} max={600} step={10} onChange={(value) => update("sidebarWidth", value)} />

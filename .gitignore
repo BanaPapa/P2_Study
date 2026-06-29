@@ -12,3 +12,4 @@ skills-lock.json
 # 로컬 개발 도구 (Claude Code)
 .agents/
 .claude/
+.gstack/
