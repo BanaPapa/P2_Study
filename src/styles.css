@@ -1963,6 +1963,19 @@ body.sb-resizing .app-shell {
   animation: rise .2s both;
 }
 .modal.mini { max-width: 420px; }
+.modal.confirm-modal { width: min(440px, 100%); }
+.confirm-modal .modal-head h3 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-cute);
+  font-size: 22px;
+  color: var(--fg);
+}
+.confirm-modal .modal-body { min-height: 0; }
+.confirm-modal .modal-body p { margin: 0; color: var(--muted); font-size: 17px; line-height: 1.6; }
+.btn.btn-primary.danger { background: oklch(55% 0.2 25); border-color: transparent; color: #fff; }
+.btn.btn-primary.danger:hover { background: oklch(48% 0.22 25); }
 .modal.entry-modal {
   width: 50vw;
   height: 50vh;

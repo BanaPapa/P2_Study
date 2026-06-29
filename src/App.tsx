@@ -51,6 +51,7 @@ type ModalState =
   | { kind: "category"; parentId?: string; leaf: boolean }
   | { kind: "emoji"; nodeId?: string; draftTarget?: "category" }
   | { kind: "settings" }
+  | { kind: "confirmDelete"; nodeId: string }
   | null;
 
 const STORE_KEY = "monggle-study-app-v1";
@@ -820,13 +821,26 @@ function App() {
     say("이름을 바꿨어요 ✏️");
   }
 
+  // 하위 분류나 기록이 들어 있으면 바로 지우지 않고 먼저 확인을 받는다.
   function deleteNode(nodeId: string) {
+    const node = findNode(nodes, nodeId)?.node;
+    if (!node) return;
+    const hasContent = hasChildren(node) || countEntries(node) > 0;
+    if (hasContent) {
+      setModal({ kind: "confirmDelete", nodeId });
+      return;
+    }
+    performDeleteNode(nodeId);
+  }
+
+  function performDeleteNode(nodeId: string) {
     setNodes((prev) => cloneUpdate(prev, (draft) => {
       const found = findNode(draft, nodeId);
       if (!found) return;
       found.list.splice(found.list.findIndex((item) => item.id === nodeId), 1);
     }));
     if (selectedId === nodeId) setSelectedId(allLeaves(nodes).find((leaf) => leaf.id !== nodeId)?.id);
+    setModal(null);
     say("정리했어요 🧹");
   }
 
@@ -1113,6 +1127,13 @@ function App() {
           settings={settings}
           setSettings={setSettings}
           onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.kind === "confirmDelete" && (
+        <ConfirmDeleteModal
+          node={findNode(nodes, modal.nodeId)?.node}
+          onClose={() => setModal(null)}
+          onConfirm={() => performDeleteNode(modal.nodeId)}
         />
       )}
     </div>
@@ -2154,6 +2175,42 @@ function BackIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="curren
 function PlusIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><path d="M12 5v14M5 12h14" /></svg>; }
 function EditIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>; }
 function TrashIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14" /></svg>; }
+
+function ConfirmDeleteModal({ node, onClose, onConfirm }: {
+  node?: StudyNode;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!node) return null;
+  const folderCount = node.children?.length ?? 0;
+  const entryCount = countEntries(node);
+  const parts = [
+    folderCount > 0 ? `하위 분류 ${folderCount}개` : "",
+    entryCount > 0 ? `기록 ${entryCount}개` : "",
+  ].filter(Boolean);
+  return (
+    <div className="modal-overlay show" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal confirm-modal">
+        <div className="modal-head">
+          <h3>{node.emoji || "📁"} ‘{node.name}’ 삭제할까요?</h3>
+          <IconButton label="닫기" onClick={onClose}>×</IconButton>
+        </div>
+        <div className="modal-body">
+          <p>
+            이 카테고리 안에 {parts.join("와 ")}이(가) 들어 있어요.
+            함께 삭제되며 되돌릴 수 없어요.
+          </p>
+        </div>
+        <div className="modal-foot">
+          <div className="modal-actions">
+            <button className="btn-text" onClick={onClose}>취소</button>
+            <button className="btn btn-primary danger" onClick={onConfirm}>삭제 🗑️</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function EntryModal({ node, entryId, onClose, onSave, onDelete }: {
   node?: StudyNode;
