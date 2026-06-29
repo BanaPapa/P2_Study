@@ -1256,6 +1256,9 @@ function TreeNode(props: {
   const [dot, soft] = palette[colorIndexFor(nodes, node.id) % palette.length];
   const selected = props.selectedId === node.id;
   const hasKids = Boolean(node.children?.length);
+  // 하위 폴더와 직접 기록이 섞여 있는 노드는 이름 옆에 직접 기록 개수를 작게 표시한다.
+  const ownEntries = node.entries?.length ?? 0;
+  const showMixCount = hasKids && ownEntries > 0;
   const menu = props.openMenuId === node.id;
   const openMenu = () => props.setOpenMenuId(node.id);
   const closeMenu = () => props.setOpenMenuId(undefined);
@@ -1324,6 +1327,9 @@ function TreeNode(props: {
           />
         ) : (
           <span className="name">{node.name}</span>
+        )}
+        {!editing && showMixCount && (
+          <span className="mix-count" title={`이 폴더의 기록 ${ownEntries}개`}>+{ownEntries}</span>
         )}
       </div>
       {menu && (
