@@ -3411,6 +3411,7 @@ body.sb-resizing .app-shell {
 .hr-ctx-sep { width: 1px; height: 16px; background: var(--border); margin: 0 3px; flex-shrink: 0; }
 .hr-ctx-del { color: #e57373; }
 .hr-ctx-del:hover { background: rgba(229,115,115,0.1); }
+.table-ctx { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px 6px; display: flex; align-items: center; gap: 2px; box-shadow: 0 4px 16px rgba(0,0,0,0.14); user-select: none; }
 
 /* ── 마크다운 textarea ─────────────────────── */
 .md-editor-body {

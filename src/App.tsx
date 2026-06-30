@@ -2410,11 +2410,11 @@ function ConfirmDeleteModal({ node, onClose, onConfirm }: {
   );
 }
 
-type InlineToken = string | { kind: 'strong' | 'em' | 'del' | 'code' | 'wiki' | 'big' | 'small'; text: string };
+type InlineToken = string | { kind: 'strong' | 'em' | 'del' | 'code' | 'wiki' | 'big' | 'small'; text: string } | { kind: 'fs'; text: string; size: number };
 
 function parseInline(text: string, onWiki?: (title: string) => void): JSX.Element {
   const tokens: InlineToken[] = [];
-  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}/g;
+  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let last = 0, m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) tokens.push(text.slice(last, m.index));
@@ -2425,6 +2425,7 @@ function parseInline(text: string, onWiki?: (title: string) => void): JSX.Elemen
     else if (m[5] !== undefined) tokens.push({ kind: 'wiki', text: m[5] });
     else if (m[6] !== undefined) tokens.push({ kind: 'big', text: m[6] });
     else if (m[7] !== undefined) tokens.push({ kind: 'small', text: m[7] });
+    else if (m[8] !== undefined) tokens.push({ kind: 'fs', text: m[9] ?? '', size: parseInt(m[8], 10) });
     last = m.index + m[0].length;
   }
   if (last < text.length) tokens.push(text.slice(last));
@@ -2442,6 +2443,7 @@ function parseInline(text: string, onWiki?: (title: string) => void): JSX.Elemen
       );
       if (t.kind === 'big') return <span key={i} style={{ fontSize: '1.35em', fontWeight: 600 }}>{t.text}</span>;
       if (t.kind === 'small') return <span key={i} style={{ fontSize: '0.78em', opacity: 0.75 }}>{t.text}</span>;
+      if (t.kind === 'fs') return <span key={i} style={{ fontSize: `${t.size}px` }}>{t.text}</span>;
       return null;
     })}</>
   );
@@ -2458,7 +2460,7 @@ function parseTableRow(line: string): string[] {
 function esc(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 function inlineMdToHtml(text: string): string {
-  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}/g;
+  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let result = '';
   let last = 0;
   let m: RegExpExecArray | null;
@@ -2471,6 +2473,7 @@ function inlineMdToHtml(text: string): string {
     else if (m[5] !== undefined) result += `<span class="md-wiki">${esc(m[5])}</span>`;
     else if (m[6] !== undefined) result += `<span class="md-big">${esc(m[6])}</span>`;
     else if (m[7] !== undefined) result += `<span class="md-small">${esc(m[7])}</span>`;
+    else if (m[8] !== undefined) result += `<span class="md-fs" style="font-size:${m[8]}px">${esc(m[9] ?? '')}</span>`;
     last = m.index + m[0].length;
   }
   return result + esc(text.slice(last));
@@ -2588,6 +2591,10 @@ function nodeToMd(node: Node): string {
       if (el.classList.contains('md-wiki')) return `[[${el.textContent ?? ''}]]`;
       if (el.classList.contains('md-big')) return `{big}${inner()}{/big}`;
       if (el.classList.contains('md-small')) return `{small}${inner()}{/small}`;
+      if (el.classList.contains('md-fs')) {
+        const sz = Math.round(parseFloat((el as HTMLElement).style?.fontSize) || 14);
+        return `{fs:${sz}}${inner()}{/fs}`;
+      }
       const style = el.getAttribute('style') ?? '';
       if (/font-weight\s*:\s*(bold|700)/i.test(style)) return `**${inner()}**`;
       if (/font-style\s*:\s*italic/i.test(style)) return `*${inner()}*`;
@@ -2913,15 +2920,83 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
   const isEditingRef = useRef(false);
   const valueRef = useRef(value);
   const [hrCtx, setHrCtx] = useState<{ el: HTMLElement; x: number; y: number } | null>(null);
+  const [tableCtx, setTableCtx] = useState<{ table: HTMLElement; td: HTMLElement; x: number; y: number } | null>(null);
 
   useEffect(() => {
-    if (!hrCtx) return;
     const close = (e: Event) => {
-      if (!(e.target as HTMLElement).closest('.hr-ctx')) setHrCtx(null);
+      const t = e.target as HTMLElement;
+      if (!t.closest('.hr-ctx')) setHrCtx(null);
+      if (!t.closest('.table-ctx')) setTableCtx(null);
     };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
-  }, [hrCtx]);
+  }, []);
+
+  const updateTableCtx = (el: HTMLElement | null) => {
+    const tdEl = el?.closest('td, th') as HTMLElement | null;
+    const tableEl = el?.closest('table') as HTMLElement | null;
+    if (tdEl && tableEl && divRef.current?.contains(tableEl)) {
+      const rect = tableEl.getBoundingClientRect();
+      setTableCtx({ table: tableEl, td: tdEl, x: rect.left, y: Math.max(4, rect.top - 42) });
+    } else if (!el?.closest('.table-ctx')) {
+      setTableCtx(null);
+    }
+  };
+
+  const getColIdx = (td: HTMLElement) => {
+    const tr = td.closest('tr');
+    return tr ? Array.from(tr.querySelectorAll('td, th')).indexOf(td) : -1;
+  };
+
+  const addRowBelow = () => {
+    if (!tableCtx) return;
+    const tr = tableCtx.td.closest('tr');
+    if (!tr) return;
+    const colCount = tr.querySelectorAll('td, th').length;
+    const newTr = document.createElement('tr');
+    for (let i = 0; i < colCount; i++) {
+      const td = document.createElement('td'); td.innerHTML = '<br>'; newTr.appendChild(td);
+    }
+    tr.after(newTr);
+    sync();
+  };
+
+  const deleteRow = () => {
+    if (!tableCtx) return;
+    const tr = tableCtx.td.closest('tr');
+    if (!tr) return;
+    tr.remove();
+    sync();
+    setTableCtx(null);
+  };
+
+  const addColRight = () => {
+    if (!tableCtx) return;
+    const colIdx = getColIdx(tableCtx.td);
+    if (colIdx < 0) return;
+    tableCtx.table.querySelectorAll('tr').forEach(tr => {
+      const cells = Array.from(tr.querySelectorAll('td, th'));
+      const isHead = !!tr.closest('thead');
+      const cell = document.createElement(isHead ? 'th' : 'td');
+      cell.innerHTML = '<br>';
+      const ref = cells[colIdx];
+      if (ref) ref.after(cell); else tr.appendChild(cell);
+    });
+    sync();
+  };
+
+  const deleteCol = () => {
+    if (!tableCtx) return;
+    const colIdx = getColIdx(tableCtx.td);
+    if (colIdx < 0) return;
+    const firstRow = tableCtx.table.querySelector('tr');
+    if (!firstRow || firstRow.querySelectorAll('td, th').length <= 1) return;
+    tableCtx.table.querySelectorAll('tr').forEach(tr => {
+      Array.from(tr.querySelectorAll('td, th'))[colIdx]?.remove();
+    });
+    sync();
+    setTableCtx(null);
+  };
 
   useLayoutEffect(() => {
     if (divRef.current) divRef.current.innerHTML = markdownToHtml(value);
@@ -2960,27 +3035,36 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
       ? range.commonAncestorContainer.parentElement
       : range.commonAncestorContainer) as HTMLElement | null;
 
-    // Ctrl+Shift+> → 크게
-    if (e.ctrlKey && e.shiftKey && e.key === '>') {
+    // Ctrl+Shift+> / < → 글씨 크기 1px씩 증감 (선택 영역 유지)
+    if (e.ctrlKey && e.shiftKey && (e.key === '>' || e.key === '<')) {
       e.preventDefault();
-      const hadSel = !sel.isCollapsed;
-      const txt = sel.isCollapsed ? '큰 텍스트' : sel.toString();
-      const tmpId = `tmp-${Math.random().toString(36).slice(2)}`;
-      document.execCommand('insertHTML', false, `<span id="${tmpId}" class="md-big">${esc(txt)}</span>`);
-      const span = divRef.current?.querySelector(`#${tmpId}`);
-      if (span) { span.removeAttribute('id'); if (hadSel) { const r = document.createRange(); r.selectNodeContents(span); const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(r); } }
-      sync();
-      return;
-    }
-    // Ctrl+Shift+< → 작게
-    if (e.ctrlKey && e.shiftKey && e.key === '<') {
-      e.preventDefault();
-      const hadSel = !sel.isCollapsed;
-      const txt = sel.isCollapsed ? '작은 텍스트' : sel.toString();
-      const tmpId = `tmp-${Math.random().toString(36).slice(2)}`;
-      document.execCommand('insertHTML', false, `<span id="${tmpId}" class="md-small">${esc(txt)}</span>`);
-      const span = divRef.current?.querySelector(`#${tmpId}`);
-      if (span) { span.removeAttribute('id'); if (hadSel) { const r = document.createRange(); r.selectNodeContents(span); const s = window.getSelection(); s?.removeAllRanges(); s?.addRange(r); } }
+      if (sel.isCollapsed) return;
+      const dir = e.key === '>' ? 1 : -1;
+      const container = (range.commonAncestorContainer.nodeType === 3
+        ? range.commonAncestorContainer.parentElement
+        : range.commonAncestorContainer) as HTMLElement | null;
+      const fsSpan = container?.closest('span.md-fs') as HTMLElement | null;
+      if (fsSpan && divRef.current?.contains(fsSpan)) {
+        const cur = parseFloat(fsSpan.style.fontSize) || 14;
+        fsSpan.style.fontSize = `${Math.max(8, Math.min(72, cur + dir))}px`;
+        const r = document.createRange();
+        r.selectNodeContents(fsSpan);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      } else {
+        const txt = sel.toString();
+        const newSize = 14 + dir;
+        const tmpId = `tmp-${Math.random().toString(36).slice(2)}`;
+        document.execCommand('insertHTML', false, `<span id="${tmpId}" class="md-fs" style="font-size:${newSize}px">${esc(txt)}</span>`);
+        const span = divRef.current?.querySelector(`#${tmpId}`) as HTMLElement | null;
+        if (span) {
+          span.removeAttribute('id');
+          const r = document.createRange();
+          r.selectNodeContents(span);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      }
       sync();
       return;
     }
@@ -3095,6 +3179,7 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
     if (target.tagName === 'HR') {
       const rect = target.getBoundingClientRect();
       setHrCtx({ el: target, x: rect.left, y: rect.bottom + 6 });
+      setTableCtx(null);
       const s = window.getSelection();
       if (s) {
         const r = document.createRange();
@@ -3105,11 +3190,22 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
       }
     } else {
       setHrCtx(null);
+      updateTableCtx(target);
     }
     if (target.classList.contains('md-wiki') && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       onWikiLink?.(target.textContent || '');
     }
+  };
+
+  const handleKeyUp = () => {
+    const s = window.getSelection();
+    if (!s?.rangeCount) return;
+    const r = s.getRangeAt(0);
+    const el = (r.commonAncestorContainer.nodeType === 3
+      ? r.commonAncestorContainer.parentElement
+      : r.commonAncestorContainer) as HTMLElement | null;
+    updateTableCtx(el);
   };
 
   return (
@@ -3125,6 +3221,7 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
         onBlur={handleBlur}
         onInput={sync}
         onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
         onPaste={handlePaste}
         onClick={handleClick}
       />
@@ -3159,6 +3256,21 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
             className="hr-ctx-btn hr-ctx-del"
             onClick={() => { hrCtx.el.remove(); sync(); setHrCtx(null); }}
           >삭제</button>
+        </div>
+      )}
+      {tableCtx && (
+        <div
+          className="table-ctx"
+          style={{ position: 'fixed', top: tableCtx.y, left: tableCtx.x, zIndex: 9999 }}
+          onMouseDown={e => e.preventDefault()}
+        >
+          <span className="hr-ctx-label">행</span>
+          <button type="button" className="hr-ctx-btn" title="아래에 행 추가" onClick={addRowBelow}>⊕행</button>
+          <button type="button" className="hr-ctx-btn hr-ctx-del" title="행 삭제" onClick={deleteRow}>⊖행</button>
+          <span className="hr-ctx-sep" />
+          <span className="hr-ctx-label">열</span>
+          <button type="button" className="hr-ctx-btn" title="오른쪽에 열 추가" onClick={addColRight}>⊕열</button>
+          <button type="button" className="hr-ctx-btn hr-ctx-del" title="열 삭제" onClick={deleteCol}>⊖열</button>
         </div>
       )}
     </div>
