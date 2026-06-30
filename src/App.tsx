@@ -2483,7 +2483,12 @@ function markdownToHtml(text: string): string {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    if (/^-{3,}\s*$/.test(line)) { parts.push('<hr class="md-hr">'); i++; continue; }
+    const hrLine = line.trim();
+    if (/^-{3,}$/.test(hrLine)) { parts.push('<hr class="md-hr">'); i++; continue; }
+    if (hrLine === '- - -') { parts.push('<hr class="md-hr md-hr-dashed">'); i++; continue; }
+    if (hrLine === '· · ·') { parts.push('<hr class="md-hr md-hr-dotted">'); i++; continue; }
+    if (hrLine === '= = =') { parts.push('<hr class="md-hr md-hr-double">'); i++; continue; }
+    if (hrLine === '* * *') { parts.push('<hr class="md-hr md-hr-deco">'); i++; continue; }
     const hm = line.match(/^(#{1,3})\s+(.+)$/);
     if (hm) { parts.push(`<h${hm[1].length}>${inlineMdToHtml(hm[2])}</h${hm[1].length}>`); i++; continue; }
     if (line.startsWith('```')) {
@@ -2549,7 +2554,13 @@ function nodeToMd(node: Node): string {
       return (v === '' || v === '\n') ? '' : v;
     }
     case 'blockquote': return `> ${inner()}`;
-    case 'hr': return '---';
+    case 'hr': {
+      if (el.classList.contains('md-hr-dashed')) return '- - -';
+      if (el.classList.contains('md-hr-dotted')) return '· · ·';
+      if (el.classList.contains('md-hr-double')) return '= = =';
+      if (el.classList.contains('md-hr-deco')) return '* * *';
+      return '---';
+    }
     case 'br': return '';
     case 'ul': return Array.from(el.querySelectorAll(':scope > li')).map(li => `- ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
     case 'ol': return Array.from(el.querySelectorAll(':scope > li')).map((li, idx) => `${idx + 1}. ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
@@ -2756,6 +2767,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
   allEntryTitles?: string[];
 }) {
   const [showLinkPicker, setShowLinkPicker] = useState(false);
+  const [showHrPicker, setShowHrPicker] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
 
   const focus = () => divRef.current?.focus();
@@ -2770,6 +2782,21 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
     focus();
     document.execCommand('insertHTML', false, html);
     sync();
+  };
+
+  const wrapSpan = (className: string, placeholder: string) => {
+    focus();
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const txt = sel.isCollapsed ? placeholder : sel.toString();
+    document.execCommand('insertHTML', false, `<span class="${className}">${esc(txt)}</span>`);
+    sync();
+  };
+
+  const insertHr = (type: 'solid' | 'dashed' | 'dotted' | 'double' | 'deco') => {
+    const cls = type === 'solid' ? 'md-hr' : `md-hr md-hr-${type}`;
+    insertHtml(`<hr class="${cls}"><p><br></p>`);
+    setShowHrPicker(false);
   };
 
   const insertWikiLink = (title: string) => {
@@ -2787,12 +2814,12 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
       if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
     }}>
       <div className="md-toolbar">
-        <button type="button" className="tb" title="굵게" onClick={() => exec('bold')}><b>B</b></button>
-        <button type="button" className="tb" title="기울임" onClick={() => exec('italic')}><i>I</i></button>
+        <button type="button" className="tb" title="굵게 (Ctrl+B)" onClick={() => exec('bold')}><b>B</b></button>
+        <button type="button" className="tb" title="기울임 (Ctrl+I)" onClick={() => exec('italic')}><i>I</i></button>
         <button type="button" className="tb" title="취소선" onClick={() => exec('strikeThrough')}><s>S</s></button>
         <span className="tb-sep" />
-        <button type="button" className="tb" title="크게" onClick={() => insertHtml('<span class="md-big">텍스트</span>')}><b>A+</b></button>
-        <button type="button" className="tb" title="작게" onClick={() => insertHtml('<span class="md-small">텍스트</span>')}>a-</button>
+        <button type="button" className="tb" title="크게 (Ctrl+Shift+>)" onClick={() => wrapSpan('md-big', '큰 텍스트')}><b>A+</b></button>
+        <button type="button" className="tb" title="작게 (Ctrl+Shift+<)" onClick={() => wrapSpan('md-small', '작은 텍스트')}><small>a−</small></button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="제목 1" onClick={() => exec('formatBlock', 'h1')}>H1</button>
         <button type="button" className="tb" title="제목 2" onClick={() => exec('formatBlock', 'h2')}>H2</button>
@@ -2803,7 +2830,12 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
         <button type="button" className="tb" title="인용" onClick={() => exec('formatBlock', 'blockquote')}>❝</button>
         <span className="tb-sep" />
         <button type="button" className="tb mono" title="인라인 코드" onClick={() => insertHtml('<code class="md-ic">code</code>')}>`cd`</button>
-        <button type="button" className="tb" title="구분선" onClick={() => insertHtml('<hr class="md-hr"><p><br></p>')}>—</button>
+        <button
+          type="button"
+          className={`tb${showHrPicker ? ' active' : ''}`}
+          title="구분선"
+          onClick={() => { setShowHrPicker(v => !v); setShowLinkPicker(false); }}
+        >—▾</button>
         <button type="button" className="tb" title="표 삽입" onClick={() => insertHtml(
           '<table class="md-table"><thead><tr><th>제목1</th><th>제목2</th><th>제목3</th></tr></thead>' +
           '<tbody><tr><td>내용1</td><td>내용2</td><td>내용3</td></tr></tbody></table><p><br></p>'
@@ -2813,9 +2845,18 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
           type="button"
           className={`tb tb-link${showLinkPicker ? ' active' : ''}`}
           title="노트 링크 [[]]"
-          onClick={() => setShowLinkPicker(v => !v)}
+          onClick={() => { setShowLinkPicker(v => !v); setShowHrPicker(false); }}
         >🔗 [[]]</button>
       </div>
+      {showHrPicker && (
+        <div className="hr-picker">
+          <button type="button" className="hr-pick-item" onClick={() => insertHr('solid')}><span className="hr-preview hr-solid" />실선</button>
+          <button type="button" className="hr-pick-item" onClick={() => insertHr('dashed')}><span className="hr-preview hr-dashed" />점선</button>
+          <button type="button" className="hr-pick-item" onClick={() => insertHr('dotted')}><span className="hr-preview hr-dotted" />점</button>
+          <button type="button" className="hr-pick-item" onClick={() => insertHr('double')}><span className="hr-preview hr-double" />이중선</button>
+          <button type="button" className="hr-pick-item" onClick={() => insertHr('deco')}>✦ 장식선</button>
+        </div>
+      )}
       {showLinkPicker && (
         <div className="link-picker">
           <input
@@ -2880,13 +2921,49 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Enter') return;
     const sel = window.getSelection();
     if (!sel?.rangeCount) return;
     const range = sel.getRangeAt(0);
     const node = (range.commonAncestorContainer.nodeType === 3
       ? range.commonAncestorContainer.parentElement
       : range.commonAncestorContainer) as HTMLElement | null;
+
+    // Ctrl+Shift+> → 크게
+    if (e.ctrlKey && e.shiftKey && e.key === '>') {
+      e.preventDefault();
+      const txt = sel.isCollapsed ? '큰 텍스트' : sel.toString();
+      document.execCommand('insertHTML', false, `<span class="md-big">${esc(txt)}</span>`);
+      sync();
+      return;
+    }
+    // Ctrl+Shift+< → 작게
+    if (e.ctrlKey && e.shiftKey && e.key === '<') {
+      e.preventDefault();
+      const txt = sel.isCollapsed ? '작은 텍스트' : sel.toString();
+      document.execCommand('insertHTML', false, `<span class="md-small">${esc(txt)}</span>`);
+      sync();
+      return;
+    }
+
+    if (e.key !== 'Enter') return;
+
+    // 인라인 요소(code, span) 안에서 Enter → 블록 밖에 새 단락으로 이동
+    const inlineEl = node?.closest('code, span');
+    if (inlineEl && inlineEl !== divRef.current && divRef.current?.contains(inlineEl)) {
+      e.preventDefault();
+      const blockEl = inlineEl.closest('p, li, blockquote');
+      const insertAfter = (blockEl && blockEl !== divRef.current) ? blockEl : inlineEl;
+      const p = document.createElement('p');
+      p.innerHTML = '<br>';
+      insertAfter.after(p);
+      const r = document.createRange();
+      r.setStart(p, 0);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      sync();
+      return;
+    }
 
     // 제목 안에서 Enter → 새 단락 생성
     const headingEl = node?.closest('h1,h2,h3');
