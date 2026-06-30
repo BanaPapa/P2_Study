@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, JSX, MouseEvent, ReactNode } from "react";
 import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
@@ -2454,6 +2454,133 @@ function parseTableRow(line: string): string[] {
   return e.split('|').slice(1, -1).map(c => c.trim());
 }
 
+// ── WYSIWYG 에디터 유틸리티 ─────────────────────────────
+function esc(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function inlineMdToHtml(text: string): string {
+  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}/g;
+  let result = '';
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    result += esc(text.slice(last, m.index));
+    if (m[1] !== undefined) result += `<strong>${esc(m[1])}</strong>`;
+    else if (m[2] !== undefined) result += `<em>${esc(m[2])}</em>`;
+    else if (m[3] !== undefined) result += `<del>${esc(m[3])}</del>`;
+    else if (m[4] !== undefined) result += `<code class="md-ic">${esc(m[4])}</code>`;
+    else if (m[5] !== undefined) result += `<span class="md-wiki">${esc(m[5])}</span>`;
+    else if (m[6] !== undefined) result += `<span class="md-big">${esc(m[6])}</span>`;
+    else if (m[7] !== undefined) result += `<span class="md-small">${esc(m[7])}</span>`;
+    last = m.index + m[0].length;
+  }
+  return result + esc(text.slice(last));
+}
+
+function markdownToHtml(text: string): string {
+  if (!text.trim()) return '<p><br></p>';
+  const lines = text.split('\n');
+  const parts: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^-{3,}\s*$/.test(line)) { parts.push('<hr class="md-hr">'); i++; continue; }
+    const hm = line.match(/^(#{1,3})\s+(.+)$/);
+    if (hm) { parts.push(`<h${hm[1].length}>${inlineMdToHtml(hm[2])}</h${hm[1].length}>`); i++; continue; }
+    if (line.startsWith('```')) {
+      const code: string[] = []; i++;
+      while (i < lines.length && !lines[i].startsWith('```')) { code.push(esc(lines[i])); i++; }
+      parts.push(`<pre class="md-pre"><code>${code.join('\n')}</code></pre>`); i++; continue;
+    }
+    if (line.startsWith('> ')) { parts.push(`<blockquote class="md-bq">${inlineMdToHtml(line.slice(2))}</blockquote>`); i++; continue; }
+    const cbm = line.match(/^[-*]\s+\[([x ])\]\s+(.*)$/i);
+    if (cbm) {
+      parts.push(`<div class="md-check"><input type="checkbox"${cbm[1].toLowerCase() === 'x' ? ' checked' : ''} disabled><span>${inlineMdToHtml(cbm[2])}</span></div>`);
+      i++; continue;
+    }
+    if (/^[-*]\s+/.test(line) && !line.match(/^[-*]\s+\[/)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*]\s+/.test(lines[i]) && !lines[i].match(/^[-*]\s+\[/)) {
+        items.push(`<li>${inlineMdToHtml(lines[i].replace(/^[-*]\s+/, ''))}</li>`); i++;
+      }
+      parts.push(`<ul class="md-ul">${items.join('')}</ul>`); continue;
+    }
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        items.push(`<li>${inlineMdToHtml(lines[i].replace(/^\d+\.\s+/, ''))}</li>`); i++;
+      }
+      parts.push(`<ol class="md-ol">${items.join('')}</ol>`); continue;
+    }
+    if (line.includes('|') && i + 1 < lines.length && /^\|?[\s:|-]+\|/.test(lines[i + 1])) {
+      const headers = parseTableRow(line); i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes('|')) { rows.push(parseTableRow(lines[i])); i++; }
+      parts.push(`<table class="md-table"><thead><tr>${headers.map(h => `<th>${inlineMdToHtml(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inlineMdToHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+      continue;
+    }
+    if (!line.trim()) { parts.push('<div class="md-gap"><br></div>'); i++; continue; }
+    parts.push(`<p class="md-p">${inlineMdToHtml(line)}</p>`); i++;
+  }
+  return parts.join('') || '<p><br></p>';
+}
+
+function nodeToMd(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
+  const el = node as HTMLElement;
+  const tag = el.tagName?.toLowerCase() ?? '';
+  const inner = () => Array.from(el.childNodes).map(nodeToMd).join('');
+  switch (tag) {
+    case 'h1': return `# ${inner()}`;
+    case 'h2': return `## ${inner()}`;
+    case 'h3': return `### ${inner()}`;
+    case 'p': {
+      if (el.classList.contains('md-gap')) return '';
+      const v = inner();
+      return (v === '' || v === '\n') ? '' : v;
+    }
+    case 'div': {
+      if (el.classList.contains('md-gap')) return '';
+      if (el.classList.contains('md-check')) {
+        const cb = el.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+        const span = el.querySelector('span') ?? el;
+        return `- [${cb?.checked ? 'x' : ' '}] ${Array.from(span.childNodes).map(nodeToMd).join('')}`;
+      }
+      const v = inner();
+      return (v === '' || v === '\n') ? '' : v;
+    }
+    case 'blockquote': return `> ${inner()}`;
+    case 'hr': return '---';
+    case 'br': return '';
+    case 'ul': return Array.from(el.querySelectorAll(':scope > li')).map(li => `- ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
+    case 'ol': return Array.from(el.querySelectorAll(':scope > li')).map((li, idx) => `${idx + 1}. ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
+    case 'pre': return `\`\`\`\n${el.querySelector('code')?.textContent ?? ''}\n\`\`\``;
+    case 'table': {
+      const ths = Array.from(el.querySelectorAll('thead th')).map(th => th.textContent ?? '');
+      const trs = Array.from(el.querySelectorAll('tbody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent ?? ''));
+      if (!ths.length) return inner();
+      return `| ${ths.join(' | ')} |\n|${ths.map(() => '------').join('|')}|\n${trs.map(r => `| ${r.join(' | ')} |`).join('\n')}`;
+    }
+    case 'strong': case 'b': return `**${inner()}**`;
+    case 'em': case 'i': return `*${inner()}*`;
+    case 'del': case 's': case 'strike': return `~~${inner()}~~`;
+    case 'code': return el.closest('pre') ? (el.textContent ?? '') : `\`${el.textContent ?? ''}\``;
+    case 'span': {
+      if (el.classList.contains('md-wiki')) return `[[${el.textContent ?? ''}]]`;
+      if (el.classList.contains('md-big')) return `{big}${inner()}{/big}`;
+      if (el.classList.contains('md-small')) return `{small}${inner()}{/small}`;
+      const style = el.getAttribute('style') ?? '';
+      if (/font-weight\s*:\s*(bold|700)/i.test(style)) return `**${inner()}**`;
+      if (/font-style\s*:\s*italic/i.test(style)) return `*${inner()}*`;
+      return inner();
+    }
+    default: return inner();
+  }
+}
+
+function htmlToMarkdown(el: HTMLElement): string {
+  return Array.from(el.childNodes).map(nodeToMd).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 function MarkdownPreview({ text, onWikiLink }: { text: string; onWikiLink?: (title: string) => void }) {
   const lines = text.split('\n');
   const blocks: JSX.Element[] = [];
@@ -2622,6 +2749,223 @@ function MarkdownToolbar({ taRef, value, onChange, allEntryTitles }: {
   );
 }
 
+// ── WYSIWYG 툴바 ──────────────────────────────────────
+function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
+  divRef: React.RefObject<HTMLDivElement | null>;
+  sync: () => void;
+  allEntryTitles?: string[];
+}) {
+  const [showLinkPicker, setShowLinkPicker] = useState(false);
+  const [linkSearch, setLinkSearch] = useState('');
+
+  const focus = () => divRef.current?.focus();
+
+  const exec = (cmd: string, val?: string) => {
+    focus();
+    document.execCommand(cmd, false, val);
+    sync();
+  };
+
+  const insertHtml = (html: string) => {
+    focus();
+    document.execCommand('insertHTML', false, html);
+    sync();
+  };
+
+  const insertWikiLink = (title: string) => {
+    insertHtml(`<span class="md-wiki">${esc(title)}</span>&nbsp;`);
+    setShowLinkPicker(false);
+    setLinkSearch('');
+  };
+
+  const filteredTitles = (allEntryTitles ?? [])
+    .filter(t => t.toLowerCase().includes(linkSearch.toLowerCase()))
+    .slice(0, 12);
+
+  return (
+    <div className="md-toolbar-wrap" onMouseDown={(e) => {
+      if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+    }}>
+      <div className="md-toolbar">
+        <button type="button" className="tb" title="굵게" onClick={() => exec('bold')}><b>B</b></button>
+        <button type="button" className="tb" title="기울임" onClick={() => exec('italic')}><i>I</i></button>
+        <button type="button" className="tb" title="취소선" onClick={() => exec('strikeThrough')}><s>S</s></button>
+        <span className="tb-sep" />
+        <button type="button" className="tb" title="크게" onClick={() => insertHtml('<span class="md-big">텍스트</span>')}><b>A+</b></button>
+        <button type="button" className="tb" title="작게" onClick={() => insertHtml('<span class="md-small">텍스트</span>')}>a-</button>
+        <span className="tb-sep" />
+        <button type="button" className="tb" title="제목 1" onClick={() => exec('formatBlock', 'h1')}>H1</button>
+        <button type="button" className="tb" title="제목 2" onClick={() => exec('formatBlock', 'h2')}>H2</button>
+        <button type="button" className="tb" title="제목 3" onClick={() => exec('formatBlock', 'h3')}>H3</button>
+        <span className="tb-sep" />
+        <button type="button" className="tb" title="목록" onClick={() => exec('insertUnorderedList')}>•≡</button>
+        <button type="button" className="tb" title="체크박스" onClick={() => insertHtml('<div class="md-check"><input type="checkbox" disabled><span>&nbsp;할 일</span></div><p><br></p>')}>☑</button>
+        <button type="button" className="tb" title="인용" onClick={() => exec('formatBlock', 'blockquote')}>❝</button>
+        <span className="tb-sep" />
+        <button type="button" className="tb mono" title="인라인 코드" onClick={() => insertHtml('<code class="md-ic">code</code>')}>`cd`</button>
+        <button type="button" className="tb" title="구분선" onClick={() => insertHtml('<hr class="md-hr"><p><br></p>')}>—</button>
+        <button type="button" className="tb" title="표 삽입" onClick={() => insertHtml(
+          '<table class="md-table"><thead><tr><th>제목1</th><th>제목2</th><th>제목3</th></tr></thead>' +
+          '<tbody><tr><td>내용1</td><td>내용2</td><td>내용3</td></tr></tbody></table><p><br></p>'
+        )}>⊞</button>
+        <span className="tb-sep" />
+        <button
+          type="button"
+          className={`tb tb-link${showLinkPicker ? ' active' : ''}`}
+          title="노트 링크 [[]]"
+          onClick={() => setShowLinkPicker(v => !v)}
+        >🔗 [[]]</button>
+      </div>
+      {showLinkPicker && (
+        <div className="link-picker">
+          <input
+            className="link-picker-search"
+            placeholder="노트 이름 검색..."
+            value={linkSearch}
+            onChange={e => setLinkSearch(e.target.value)}
+            autoFocus
+          />
+          <div className="link-picker-list">
+            {filteredTitles.length === 0 ? (
+              <div className="link-picker-empty">노트가 없습니다</div>
+            ) : filteredTitles.map(t => (
+              <button key={t} type="button" className="link-picker-item" onClick={() => insertWikiLink(t)}>{t}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── WYSIWYG 에디터 ─────────────────────────────────────
+function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitles }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  onWikiLink?: (title: string) => void;
+  allEntryTitles?: string[];
+}) {
+  const divRef = useRef<HTMLDivElement | null>(null);
+  const isEditingRef = useRef(false);
+  const valueRef = useRef(value);
+
+  useLayoutEffect(() => {
+    if (divRef.current) divRef.current.innerHTML = markdownToHtml(value);
+  // only on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    valueRef.current = value;
+    if (!isEditingRef.current && divRef.current) {
+      divRef.current.innerHTML = markdownToHtml(value);
+    }
+  }, [value]);
+
+  const sync = () => {
+    if (!divRef.current) return;
+    const md = htmlToMarkdown(divRef.current);
+    valueRef.current = md;
+    onChange(md);
+  };
+
+  const handleBlur = () => {
+    isEditingRef.current = false;
+    setTimeout(() => {
+      if (!isEditingRef.current && divRef.current) {
+        divRef.current.innerHTML = markdownToHtml(valueRef.current);
+      }
+    }, 200);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter') return;
+    const sel = window.getSelection();
+    if (!sel?.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = (range.commonAncestorContainer.nodeType === 3
+      ? range.commonAncestorContainer.parentElement
+      : range.commonAncestorContainer) as HTMLElement | null;
+
+    // 제목 안에서 Enter → 새 단락 생성
+    const headingEl = node?.closest('h1,h2,h3');
+    if (headingEl) {
+      e.preventDefault();
+      const p = document.createElement('p');
+      p.innerHTML = '<br>';
+      headingEl.after(p);
+      const r = document.createRange();
+      r.setStart(p, 0);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      sync();
+      return;
+    }
+
+    // 단락에 # ## ### 문법 입력 후 Enter → 제목으로 변환
+    const paraEl = node?.closest('p,div');
+    if (paraEl && paraEl !== divRef.current) {
+      const text = paraEl.textContent || '';
+      const hm = text.match(/^(#{1,3})\s+(.+)$/);
+      if (hm) {
+        e.preventDefault();
+        const lv = hm[1].length as 1 | 2 | 3;
+        const h = document.createElement(`h${lv}`) as HTMLElement;
+        h.textContent = hm[2];
+        paraEl.replaceWith(h);
+        const p = document.createElement('p');
+        p.innerHTML = '<br>';
+        h.after(p);
+        const r = document.createRange();
+        r.setStart(p, 0);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+        sync();
+        return;
+      }
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    if (text) {
+      document.execCommand('insertHTML', false, markdownToHtml(text));
+      sync();
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('md-wiki') && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      onWikiLink?.(target.textContent || '');
+    }
+  };
+
+  return (
+    <div className="wysiwyg-wrap">
+      <WysiwygToolbar divRef={divRef} sync={sync} allEntryTitles={allEntryTitles} />
+      <div
+        ref={divRef}
+        contentEditable
+        suppressContentEditableWarning
+        className="wysiwyg-editor"
+        data-placeholder={placeholder}
+        onFocus={() => { isEditingRef.current = true; }}
+        onBlur={handleBlur}
+        onInput={sync}
+        onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onClick={handleClick}
+      />
+    </div>
+  );
+}
+
 function EntryModal({ node, entryId, onClose, onSave, onDelete, nodePath, obsidianVault, allNodes, onWikiLink }: {
   node?: StudyNode;
   entryId?: string;
@@ -2643,8 +2987,6 @@ function EntryModal({ node, entryId, onClose, onSave, onDelete, nodePath, obsidi
   const [tagInput, setTagInput] = useState("");
   const [linkName, setLinkName] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
-  const [preview, setPreview] = useState(false);
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
 
   const allEntryTitles = useMemo(() => {
     if (!allNodes) return [];
@@ -2688,26 +3030,17 @@ function EntryModal({ node, entryId, onClose, onSave, onDelete, nodePath, obsidi
           <button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>📝 내용</button>
           <button className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>📎 파일 <span>{attachments.filter((a) => a.type !== "link").length || ""}</span></button>
           <button className={tab === "links" ? "active" : ""} onClick={() => setTab("links")}>🔗 링크 <span>{attachments.filter((a) => a.type === "link").length || ""}</span></button>
-          {tab === "content" && (
-            <button type="button" className={`preview-toggle-btn ${preview ? "active" : ""}`} onClick={() => setPreview((v) => !v)}>
-              {preview ? "✏️ 편집" : "👁 미리보기"}
-            </button>
-          )}
         </div>
         <div className="modal-body md-editor-body">
-          {tab === "content" && !preview && (
-            <>
-              <MarkdownToolbar taRef={taRef} value={body} onChange={setBody} allEntryTitles={allEntryTitles} />
-              <textarea
-                ref={taRef}
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder={"# 제목으로 시작해보세요\n\n**굵게**, *기울임*, ~~취소선~~\n- 목록 항목\n- [ ] 할 일 체크박스\n> 인용문\n---\n코드: `const x = 1`"}
-                className="md-textarea"
-              />
-            </>
+          {tab === "content" && (
+            <WysiwygEditor
+              value={body}
+              onChange={setBody}
+              placeholder={"# 제목으로 구조를 잡아보세요\n\n내용을 바로 입력하면 서식이 적용됩니다\n툴바나 # 입력 후 Enter로 제목을 만들 수 있어요"}
+              onWikiLink={onWikiLink}
+              allEntryTitles={allEntryTitles}
+            />
           )}
-          {tab === "content" && preview && <MarkdownPreview text={body} onWikiLink={onWikiLink} />}
           {tab === "files" && (
             <div>
               <label className="file-drop">파일 이름으로 첨부 추가

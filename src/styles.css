@@ -3489,7 +3489,60 @@ body.sb-resizing .app-shell {
 .md-preview .md-table tr:hover td { background: oklch(from var(--accent) l c h / 0.05); }
 
 /* ── 툴바 링크 피커 ──────────────────────── */
-.md-toolbar-wrap { display: flex; flex-direction: column; flex-shrink: 0; }
+.md-toolbar-wrap { display: flex; flex-direction: column; flex-shrink: 0; flex-grow: 0; }
+
+/* ── WYSIWYG 에디터 ─────────────────────────────── */
+.wysiwyg-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.wysiwyg-editor {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  outline: none;
+  line-height: 1.7;
+  color: var(--fg);
+  font-size: var(--body-font-size);
+  font-family: var(--font);
+  cursor: text;
+  word-break: break-word;
+}
+.wysiwyg-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+  white-space: pre-line;
+  display: block;
+}
+/* 서식 스타일 — md-preview와 동일 */
+.wysiwyg-editor h1, .wysiwyg-editor h2, .wysiwyg-editor h3 { font-weight: 700; margin: 0; }
+.wysiwyg-editor h1 { font-size: 1.45em; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px; }
+.wysiwyg-editor h2 { font-size: 1.2em; margin-bottom: 4px; }
+.wysiwyg-editor h3 { font-size: 1.05em; margin-bottom: 3px; }
+.wysiwyg-editor p { margin: 4px 0; }
+.wysiwyg-editor ul, .wysiwyg-editor ol { margin: 4px 0 4px 20px; }
+.wysiwyg-editor li { margin: 2px 0; }
+.wysiwyg-editor blockquote { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--muted); margin: 6px 0; font-style: italic; }
+.wysiwyg-editor pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: monospace; font-size: 0.88em; overflow-x: auto; margin: 6px 0; }
+.wysiwyg-editor hr { border: none; border-top: 2px solid var(--border); margin: 10px 0; }
+.wysiwyg-editor .md-check { display: flex; align-items: flex-start; gap: 7px; margin: 3px 0; }
+.wysiwyg-editor .md-check input[type=checkbox] { margin-top: 4px; }
+.wysiwyg-editor .md-gap { height: 6px; }
+.wysiwyg-editor code, .wysiwyg-editor .md-ic { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: monospace; font-size: 0.88em; }
+.wysiwyg-editor strong, .wysiwyg-editor b { font-weight: 700; }
+.wysiwyg-editor em, .wysiwyg-editor i { font-style: italic; }
+.wysiwyg-editor del, .wysiwyg-editor s { text-decoration: line-through; opacity: 0.6; }
+.wysiwyg-editor .md-wiki { color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+.wysiwyg-editor .md-big { font-size: 1.35em; font-weight: 600; }
+.wysiwyg-editor .md-small { font-size: 0.78em; opacity: 0.75; }
+.wysiwyg-editor table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 0.93em; }
+.wysiwyg-editor th { background: var(--surface-2); font-weight: 600; }
+.wysiwyg-editor td, .wysiwyg-editor th { border: 1px solid var(--border); padding: 4px 10px; }
 .tb-link.active { background: var(--accent-soft); color: var(--accent); }
 .link-picker {
   background: var(--surface);
