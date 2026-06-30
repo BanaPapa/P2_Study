@@ -3451,8 +3451,8 @@ body.sb-resizing .app-shell {
 .md-preview .md-bq { border-left: 3px solid var(--accent); padding-left: 12px; color: var(--muted); margin: 6px 0; font-style: italic; }
 .md-preview .md-pre { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-family: monospace; font-size: 0.88em; overflow-x: auto; margin: 6px 0; }
 .md-preview .md-hr { border: none; border-top: 2px solid var(--border); margin: 10px 0; }
-.md-preview .md-check { display: flex; align-items: flex-start; gap: 7px; margin: 3px 0; }
-.md-preview .md-check input[type=checkbox] { margin-top: 4px; accent-color: var(--accent); }
+.md-preview .md-check { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+.md-preview .md-check input[type=checkbox] { accent-color: var(--accent); flex-shrink: 0; }
 .md-preview .md-gap { height: 6px; }
 .md-preview .md-ic { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: monospace; font-size: 0.88em; }
 .md-preview strong { font-weight: 700; }
@@ -3606,10 +3606,11 @@ body.sb-resizing .app-shell {
 .wysiwyg-editor hr.md-hr-double { border-top: 4px double var(--border); }
 .wysiwyg-editor hr.md-hr-deco { border: none; text-align: center; color: var(--muted); opacity: 0.6; }
 .wysiwyg-editor hr.md-hr-deco::before { content: '✦  ✦  ✦'; font-size: 14px; }
-.wysiwyg-editor .md-check { display: flex; align-items: flex-start; gap: 7px; margin: 3px 0; }
-.wysiwyg-editor .md-check input[type=checkbox] { margin-top: 4px; }
+.wysiwyg-editor .md-check { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+.wysiwyg-editor .md-check input[type=checkbox] { accent-color: var(--accent); flex-shrink: 0; }
 .wysiwyg-editor .md-gap { height: 6px; }
 .wysiwyg-editor code, .wysiwyg-editor .md-ic { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-family: monospace; font-size: 0.88em; }
+.wysiwyg-editor pre code { background: none; border: none; border-radius: 0; padding: 0; }
 .wysiwyg-editor strong, .wysiwyg-editor b { font-weight: 700; }
 .wysiwyg-editor em, .wysiwyg-editor i { font-style: italic; }
 .wysiwyg-editor del, .wysiwyg-editor s { text-decoration: line-through; opacity: 0.6; }

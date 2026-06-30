@@ -2507,7 +2507,7 @@ function markdownToHtml(text: string): string {
     if (line.startsWith('> ')) { parts.push(`<blockquote class="md-bq">${inlineMdToHtml(line.slice(2))}</blockquote>`); i++; continue; }
     const cbm = line.match(/^[-*]\s+\[([x ])\]\s+(.*)$/i);
     if (cbm) {
-      parts.push(`<div class="md-check"><input type="checkbox"${cbm[1].toLowerCase() === 'x' ? ' checked' : ''} disabled><span>${inlineMdToHtml(cbm[2])}</span></div>`);
+      parts.push(`<div class="md-check"><input type="checkbox"${cbm[1].toLowerCase() === 'x' ? ' checked' : ''}><span>${inlineMdToHtml(cbm[2])}</span></div>`);
       i++; continue;
     }
     if (/^[-*]\s+/.test(line) && !line.match(/^[-*]\s+\[/)) {
@@ -2576,7 +2576,13 @@ function nodeToMd(node: Node): string {
     case 'br': return '';
     case 'ul': return Array.from(el.querySelectorAll(':scope > li')).map(li => `- ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
     case 'ol': return Array.from(el.querySelectorAll(':scope > li')).map((li, idx) => `${idx + 1}. ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
-    case 'pre': return `\`\`\`\n${el.querySelector('code')?.textContent ?? ''}\n\`\`\``;
+    case 'pre': {
+      const codeEls = Array.from(el.querySelectorAll('code'));
+      const text = codeEls.length > 0
+        ? codeEls.map(c => c.textContent ?? '').join('')
+        : el.textContent ?? '';
+      return `\`\`\`\n${text}\n\`\`\``;
+    }
     case 'table': {
       const ths = Array.from(el.querySelectorAll('thead th')).map(th => th.textContent ?? '');
       const trs = Array.from(el.querySelectorAll('tbody tr')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent ?? ''));
@@ -2855,7 +2861,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
         <button type="button" className="tb" title="제목 3" onClick={() => exec('formatBlock', 'h3')}>H3</button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="목록" onClick={() => exec('insertUnorderedList')}>•≡</button>
-        <button type="button" className="tb" title="체크박스" onClick={() => insertHtml('<div class="md-check"><input type="checkbox" disabled><span>&nbsp;할 일</span></div><p><br></p>')}>☑</button>
+        <button type="button" className="tb" title="체크박스" onClick={() => insertHtml('<div class="md-check"><input type="checkbox"><span>&nbsp;할 일</span></div><p><br></p>')}>☑</button>
         <button type="button" className="tb" title="인용" onClick={() => exec('formatBlock', 'blockquote')}>❝</button>
         <span className="tb-sep" />
         <button type="button" className="tb mono" title="인라인 코드" onClick={() => insertHtml('<code class="md-ic">code</code>')}>`cd`</button>
@@ -3020,9 +3026,11 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
 
   const handleBlur = () => {
     isEditingRef.current = false;
+    sync(); // blur 시 최신 DOM 상태를 즉시 캡처
+    const snapshot = valueRef.current;
     setTimeout(() => {
       if (!isEditingRef.current && divRef.current) {
-        divRef.current.innerHTML = markdownToHtml(valueRef.current);
+        divRef.current.innerHTML = markdownToHtml(snapshot);
       }
     }, 200);
   };
@@ -3176,6 +3184,13 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'checkbox') {
+      e.preventDefault();
+      const cb = target as HTMLInputElement;
+      cb.checked = !cb.checked;
+      sync();
+      return;
+    }
     if (target.tagName === 'HR') {
       const rect = target.getBoundingClientRect();
       setHrCtx({ el: target, x: rect.left, y: rect.bottom + 6 });
