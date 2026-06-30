@@ -2484,11 +2484,16 @@ function markdownToHtml(text: string): string {
   while (i < lines.length) {
     const line = lines[i];
     const hrLine = line.trim();
-    if (/^-{3,}$/.test(hrLine)) { parts.push('<hr class="md-hr">'); i++; continue; }
-    if (hrLine === '- - -') { parts.push('<hr class="md-hr md-hr-dashed">'); i++; continue; }
-    if (hrLine === '· · ·') { parts.push('<hr class="md-hr md-hr-dotted">'); i++; continue; }
-    if (hrLine === '= = =') { parts.push('<hr class="md-hr md-hr-double">'); i++; continue; }
-    if (hrLine === '* * *') { parts.push('<hr class="md-hr md-hr-deco">'); i++; continue; }
+    {
+      const hrm = hrLine.match(/^(-{3,}|- - -|· · ·|= = =|\* \* \*)(?:\s+w(\d+))?$/);
+      if (hrm) {
+        const w = parseInt(hrm[2] ?? '100', 10);
+        const ws = w < 100 ? ` style="width:${w}%;margin-left:auto;margin-right:auto"` : '';
+        const typeMap: Record<string, string> = { '- - -': 'md-hr md-hr-dashed', '· · ·': 'md-hr md-hr-dotted', '= = =': 'md-hr md-hr-double', '* * *': 'md-hr md-hr-deco' };
+        const cls = typeMap[hrm[1]] ?? 'md-hr';
+        parts.push(`<hr class="${cls}"${ws}>`); i++; continue;
+      }
+    }
     const hm = line.match(/^(#{1,3})\s+(.+)$/);
     if (hm) { parts.push(`<h${hm[1].length}>${inlineMdToHtml(hm[2])}</h${hm[1].length}>`); i++; continue; }
     if (line.startsWith('```')) {
@@ -2555,11 +2560,15 @@ function nodeToMd(node: Node): string {
     }
     case 'blockquote': return `> ${inner()}`;
     case 'hr': {
-      if (el.classList.contains('md-hr-dashed')) return '- - -';
-      if (el.classList.contains('md-hr-dotted')) return '· · ·';
-      if (el.classList.contains('md-hr-double')) return '= = =';
-      if (el.classList.contains('md-hr-deco')) return '* * *';
-      return '---';
+      const hrEl = el as HTMLElement;
+      const wm = hrEl.style?.width?.match(/^(\d+)%$/);
+      const w = wm ? parseInt(wm[1], 10) : 100;
+      const ws = w < 100 ? ` w${w}` : '';
+      if (el.classList.contains('md-hr-dashed')) return `- - -${ws}`;
+      if (el.classList.contains('md-hr-dotted')) return `· · ·${ws}`;
+      if (el.classList.contains('md-hr-double')) return `= = =${ws}`;
+      if (el.classList.contains('md-hr-deco')) return `* * *${ws}`;
+      return `---${ws}`;
     }
     case 'br': return '';
     case 'ul': return Array.from(el.querySelectorAll(':scope > li')).map(li => `- ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
@@ -2903,6 +2912,16 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
   const divRef = useRef<HTMLDivElement | null>(null);
   const isEditingRef = useRef(false);
   const valueRef = useRef(value);
+  const [hrCtx, setHrCtx] = useState<{ el: HTMLElement; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!hrCtx) return;
+    const close = (e: Event) => {
+      if (!(e.target as HTMLElement).closest('.hr-ctx')) setHrCtx(null);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [hrCtx]);
 
   useLayoutEffect(() => {
     if (divRef.current) divRef.current.innerHTML = markdownToHtml(value);
@@ -2968,15 +2987,39 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
 
     if (e.key !== 'Enter') return;
 
-    // 코드 요소 안에서 Shift+Enter → 코드 안에 줄바꿈 삽입 (코드창 유지)
+    // 인라인 코드에서 Shift+Enter → pre 코드블록으로 변환
     if (e.shiftKey) {
       const codeEl = node?.closest('code');
-      if (codeEl && divRef.current?.contains(codeEl)) {
+      if (codeEl && !codeEl.closest('pre') && divRef.current?.contains(codeEl)) {
         e.preventDefault();
-        document.execCommand('insertText', false, '\n');
+        const content = codeEl.textContent ?? '';
+        const pre = document.createElement('pre');
+        pre.className = 'md-pre';
+        const inner = document.createElement('code');
+        inner.textContent = content + '\n';
+        pre.appendChild(inner);
+        codeEl.replaceWith(pre);
+        const textNode = inner.firstChild as Text | null;
+        if (textNode) {
+          const r = document.createRange();
+          r.setStart(textNode, textNode.length);
+          r.collapse(true);
+          const s = window.getSelection();
+          s?.removeAllRanges();
+          s?.addRange(r);
+        }
         sync();
         return;
       }
+    }
+
+    // pre 코드블록 안에서 Enter → 줄바꿈 삽입 (블록 유지)
+    const preEl = node?.closest('pre');
+    if (preEl && divRef.current?.contains(preEl)) {
+      e.preventDefault();
+      document.execCommand('insertText', false, '\n');
+      sync();
+      return;
     }
 
     // 인라인 요소(code, span) 안에서 Enter → 블록 밖에 새 단락으로 이동
@@ -3050,6 +3093,8 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     if (target.tagName === 'HR') {
+      const rect = target.getBoundingClientRect();
+      setHrCtx({ el: target, x: rect.left, y: rect.bottom + 6 });
       const s = window.getSelection();
       if (s) {
         const r = document.createRange();
@@ -3058,6 +3103,8 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
         s.removeAllRanges();
         s.addRange(r);
       }
+    } else {
+      setHrCtx(null);
     }
     if (target.classList.contains('md-wiki') && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -3081,6 +3128,39 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
         onPaste={handlePaste}
         onClick={handleClick}
       />
+      {hrCtx && (
+        <div
+          className="hr-ctx"
+          style={{ position: 'fixed', top: hrCtx.y, left: hrCtx.x, zIndex: 9999 }}
+          onMouseDown={e => e.preventDefault()}
+        >
+          <span className="hr-ctx-label">너비</span>
+          {([25, 50, 75, 100] as const).map(w => {
+            const curW = hrCtx.el.style.width;
+            const isActive = curW === `${w}%` || (!curW && w === 100);
+            return (
+              <button
+                key={w}
+                type="button"
+                className={`hr-ctx-btn${isActive ? ' active' : ''}`}
+                onClick={() => {
+                  hrCtx.el.style.width = w < 100 ? `${w}%` : '';
+                  hrCtx.el.style.marginLeft = w < 100 ? 'auto' : '';
+                  hrCtx.el.style.marginRight = w < 100 ? 'auto' : '';
+                  sync();
+                  setHrCtx({ ...hrCtx });
+                }}
+              >{w}%</button>
+            );
+          })}
+          <span className="hr-ctx-sep" />
+          <button
+            type="button"
+            className="hr-ctx-btn hr-ctx-del"
+            onClick={() => { hrCtx.el.remove(); sync(); setHrCtx(null); }}
+          >삭제</button>
+        </div>
+      )}
     </div>
   );
 }
