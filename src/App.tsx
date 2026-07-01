@@ -47,6 +47,7 @@ type Settings = {
   bodySize: number;
   titleSize: number;
   obsidianVault: string;
+  vaultAutoSync: boolean;
 };
 
 type ModalState =
@@ -374,7 +375,8 @@ const defaultSettings: Settings = {
   navSize: 16,
   bodySize: 16,
   titleSize: 30,
-  obsidianVault: ""
+  obsidianVault: "",
+  vaultAutoSync: false
 };
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -904,7 +906,7 @@ function cloneUpdate(nodes: StudyNode[], updater: (draft: StudyNode[]) => void) 
   return draft;
 }
 
-function exportNoteToMd(folderPath: string, entry: StudyEntry) {
+function buildMdContent(folderPath: string, entry: StudyEntry): string {
   const yaml = [
     '---',
     `title: "${entry.title.replace(/"/g, '\\"')}"`,
@@ -914,8 +916,16 @@ function exportNoteToMd(folderPath: string, entry: StudyEntry) {
     '---',
     '',
   ].join('\n');
-  const content = yaml + entry.body;
-  const safe = entry.title.replace(/[\\/:*?"<>|]/g, '').trim() || 'note';
+  return yaml + entry.body;
+}
+
+function sanitizeFsName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '').trim();
+}
+
+function exportNoteToMd(folderPath: string, entry: StudyEntry) {
+  const content = buildMdContent(folderPath, entry);
+  const safe = sanitizeFsName(entry.title) || 'note';
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -925,6 +935,159 @@ function exportNoteToMd(folderPath: string, entry: StudyEntry) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ── Obsidian 볼트 폴더 실시간 동기화 (File System Access API, 데스크탑 Chromium 전용) ──
+// 브라우저 지원 편차가 커서 lib.dom 타입에 기대지 않고 핸들을 any로 다룬다.
+const VAULT_DB_NAME = 'p2study_vault';
+const VAULT_STORE_NAME = 'handles';
+const VAULT_HANDLE_KEY = 'dir';
+const VAULT_LAST_SYNC_KEY = 'p2study_vault_last_sync';
+const VAULT_SUBFOLDER = '몽글 Study';
+
+function vaultSupported(): boolean {
+  return typeof window !== 'undefined' && typeof (window as any).showDirectoryPicker === 'function';
+}
+
+function openVaultDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(VAULT_DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(VAULT_STORE_NAME);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbGetVaultHandle(): Promise<any | null> {
+  try {
+    const db = await openVaultDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(VAULT_STORE_NAME, 'readonly');
+      const req = tx.objectStore(VAULT_STORE_NAME).get(VAULT_HANDLE_KEY);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function idbSetVaultHandle(handle: any | null): Promise<void> {
+  try {
+    const db = await openVaultDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(VAULT_STORE_NAME, 'readwrite');
+      if (handle) tx.objectStore(VAULT_STORE_NAME).put(handle, VAULT_HANDLE_KEY);
+      else tx.objectStore(VAULT_STORE_NAME).delete(VAULT_HANDLE_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    // IndexedDB 사용 불가 시 조용히 무시 — 매 세션 재연결만 필요해질 뿐
+  }
+}
+
+async function verifyVaultPermission(handle: any, requestIfNeeded: boolean): Promise<boolean> {
+  const opts = { mode: 'readwrite' };
+  if (typeof handle?.queryPermission !== 'function') return false;
+  const current = await handle.queryPermission(opts);
+  if (current === 'granted') return true;
+  if (!requestIfNeeded || typeof handle.requestPermission !== 'function') return false;
+  const requested = await handle.requestPermission(opts);
+  return requested === 'granted';
+}
+
+type VaultFile = { pathSegments: string[]; entry: StudyEntry };
+
+function collectVaultFiles(nodes: StudyNode[], trail: string[] = []): VaultFile[] {
+  const out: VaultFile[] = [];
+  for (const node of nodes) {
+    const nextTrail = [...trail, sanitizeFsName(node.name) || '폴더'];
+    (node.entries ?? []).forEach((entry) => out.push({ pathSegments: nextTrail, entry }));
+    if (node.children?.length) out.push(...collectVaultFiles(node.children, nextTrail));
+  }
+  return out;
+}
+
+type VaultTree = { files: Map<string, string>; dirs: Map<string, VaultTree> };
+
+function buildVaultTree(files: VaultFile[]): VaultTree {
+  const root: VaultTree = { files: new Map(), dirs: new Map() };
+  for (const f of files) {
+    let node = root;
+    for (const seg of f.pathSegments) {
+      if (!node.dirs.has(seg)) node.dirs.set(seg, { files: new Map(), dirs: new Map() });
+      node = node.dirs.get(seg)!;
+    }
+    const folderPath = f.pathSegments.join(' › ');
+    const content = buildMdContent(folderPath, f.entry);
+    const base = sanitizeFsName(f.entry.title) || 'note';
+    let finalName = `${base}.md`;
+    let n = 2;
+    while (node.files.has(finalName)) { finalName = `${base} (${n}).md`; n++; }
+    node.files.set(finalName, content);
+  }
+  return root;
+}
+
+// tree와 다른 파일/폴더는 삭제하는 미러 동기화. VAULT_SUBFOLDER 안에서만 동작하므로
+// 볼트에 이미 있던 다른 노트나 .obsidian 설정 폴더는 절대 건드리지 않는다.
+async function syncDirWithTree(dir: any, tree: VaultTree): Promise<{ written: number; deleted: number }> {
+  let written = 0;
+  let deleted = 0;
+  const existingFiles = new Set<string>();
+  const existingDirs = new Set<string>();
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind === 'file') existingFiles.add(name);
+    else existingDirs.add(name);
+  }
+
+  for (const [name, content] of tree.files) {
+    let needsWrite = true;
+    if (existingFiles.has(name)) {
+      try {
+        const fh = await dir.getFileHandle(name);
+        const existingText = await (await fh.getFile()).text();
+        needsWrite = existingText !== content;
+      } catch {
+        needsWrite = true;
+      }
+    }
+    if (needsWrite) {
+      const fh = await dir.getFileHandle(name, { create: true });
+      const writable = await fh.createWritable();
+      await writable.write(content);
+      await writable.close();
+      written++;
+    }
+  }
+  for (const name of existingFiles) {
+    if (!tree.files.has(name)) {
+      await dir.removeEntry(name);
+      deleted++;
+    }
+  }
+
+  for (const [name, subtree] of tree.dirs) {
+    const subdir = await dir.getDirectoryHandle(name, { create: true });
+    const result = await syncDirWithTree(subdir, subtree);
+    written += result.written;
+    deleted += result.deleted;
+  }
+  for (const name of existingDirs) {
+    if (!tree.dirs.has(name)) {
+      await dir.removeEntry(name, { recursive: true });
+      deleted++;
+    }
+  }
+
+  return { written, deleted };
+}
+
+async function syncNodesToVault(rootHandle: any, nodes: StudyNode[]): Promise<{ written: number; deleted: number }> {
+  const appDir = await rootHandle.getDirectoryHandle(VAULT_SUBFOLDER, { create: true });
+  const tree = buildVaultTree(collectVaultFiles(nodes));
+  return syncDirWithTree(appDir, tree);
 }
 
 function App() {
@@ -950,6 +1113,15 @@ function App() {
   const [dropInfo, setDropInfo] = useState<{ id: string; position: "before" | "after" | "inside" } | undefined>();
   const dragRef = useRef<{ dragId?: string; dropInfo?: { id: string; position: "before" | "after" | "inside" } }>({});
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  const [vaultHandle, setVaultHandle] = useState<any | null>(null);
+  const [vaultStatus, setVaultStatus] = useState<"idle" | "connected" | "needs-permission" | "syncing" | "error">("idle");
+  const [vaultLastSync, setVaultLastSync] = useState<string | null>(() => localStorage.getItem(VAULT_LAST_SYNC_KEY));
+  const [vaultError, setVaultError] = useState<string | null>(null);
+  const vaultHandleRef = useRef<any | null>(null);
+  const vaultStatusRef = useRef(vaultStatus);
+  useEffect(() => { vaultHandleRef.current = vaultHandle; }, [vaultHandle]);
+  useEffect(() => { vaultStatusRef.current = vaultStatus; }, [vaultStatus]);
 
   function onSidebarResizeStart(e: React.MouseEvent) {
     if (navCollapsed) return;
@@ -1001,6 +1173,81 @@ function App() {
     lastSavedRef.current = json;
     saveNodesMutation({ data: json }).catch(() => {});
   }, [nodes, isAuthenticated]);
+
+  const runVaultSync = async (handle?: any) => {
+    const h = handle ?? vaultHandleRef.current;
+    if (!h) return;
+    setVaultStatus("syncing");
+    try {
+      await syncNodesToVault(h, nodes);
+      const now = new Date().toLocaleString("ko-KR");
+      setVaultLastSync(now);
+      localStorage.setItem(VAULT_LAST_SYNC_KEY, now);
+      setVaultStatus("connected");
+      setVaultError(null);
+    } catch {
+      setVaultStatus("error");
+      setVaultError("동기화 중 오류가 발생했어요");
+    }
+  };
+
+  const connectVault = async () => {
+    try {
+      const h = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+      await idbSetVaultHandle(h);
+      setVaultHandle(h);
+      setVaultStatus("connected");
+      setVaultError(null);
+      await runVaultSync(h);
+    } catch (err) {
+      if ((err as any)?.name !== "AbortError") setVaultError("폴더 연결에 실패했어요");
+    }
+  };
+
+  const disconnectVault = async () => {
+    await idbSetVaultHandle(null);
+    setVaultHandle(null);
+    setVaultStatus("idle");
+    setVaultLastSync(null);
+    setVaultError(null);
+    localStorage.removeItem(VAULT_LAST_SYNC_KEY);
+  };
+
+  const reconnectVaultPermission = async () => {
+    if (!vaultHandle) return;
+    const granted = await verifyVaultPermission(vaultHandle, true);
+    setVaultStatus(granted ? "connected" : "needs-permission");
+    if (granted) await runVaultSync(vaultHandle);
+  };
+
+  // 저장된 볼트 핸들 복원 (권한은 사용자 제스처 없이는 재요청할 수 없어 조회만 시도)
+  useEffect(() => {
+    if (!vaultSupported()) return;
+    (async () => {
+      const h = await idbGetVaultHandle();
+      if (!h) return;
+      setVaultHandle(h);
+      const granted = await verifyVaultPermission(h, false);
+      setVaultStatus(granted ? "connected" : "needs-permission");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 볼트가 막 연결된 시점의 현재 데이터로 한 번 동기화
+  useEffect(() => {
+    if (settings.vaultAutoSync && vaultHandle && vaultStatus === "connected") {
+      runVaultSync(vaultHandle);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vaultStatus]);
+
+  // 노트 변경(로컬 편집 또는 다른 기기발 Convex 수신) 시 자동 동기화
+  useEffect(() => {
+    if (settings.vaultAutoSync && vaultHandleRef.current && vaultStatusRef.current === "connected") {
+      runVaultSync(vaultHandleRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes]);
 
   useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
   useEffect(() => {
@@ -1309,7 +1556,19 @@ function App() {
         ) : view === "stats" ? (
           <StatsView nodes={nodes} searchTag={(tag) => setQuery(`#${tag}`)} />
         ) : view === "profile" ? (
-          <ProfileView />
+          <ProfileView
+            vaultSupported={vaultSupported()}
+            vaultStatus={vaultStatus}
+            vaultHandleName={vaultHandle?.name}
+            vaultLastSync={vaultLastSync}
+            vaultError={vaultError}
+            vaultAutoSync={settings.vaultAutoSync}
+            onConnectVault={connectVault}
+            onDisconnectVault={disconnectVault}
+            onSyncNowVault={() => runVaultSync()}
+            onReconnectPermission={reconnectVaultPermission}
+            onToggleAutoSync={(value) => setSettings((s) => ({ ...s, vaultAutoSync: value }))}
+          />
         ) : view === "graph" ? (
           <GraphView nodes={nodes} onNavigate={(nodeId) => { setView("tree"); setSelectedId(nodeId); }} />
         ) : selected ? (
@@ -1998,7 +2257,30 @@ function GraphView({ nodes: studyNodes, onNavigate }: { nodes: StudyNode[]; onNa
   );
 }
 
-function ProfileView() {
+function ProfileView({
+  vaultSupported, vaultStatus, vaultHandleName, vaultLastSync, vaultError, vaultAutoSync,
+  onConnectVault, onDisconnectVault, onSyncNowVault, onReconnectPermission, onToggleAutoSync
+}: {
+  vaultSupported: boolean;
+  vaultStatus: "idle" | "connected" | "needs-permission" | "syncing" | "error";
+  vaultHandleName?: string;
+  vaultLastSync: string | null;
+  vaultError: string | null;
+  vaultAutoSync: boolean;
+  onConnectVault: () => void;
+  onDisconnectVault: () => void;
+  onSyncNowVault: () => void;
+  onReconnectPermission: () => void;
+  onToggleAutoSync: (value: boolean) => void;
+}) {
+  const statusLabel = !vaultSupported
+    ? "이 브라우저는 지원하지 않아요"
+    : vaultStatus === "idle" ? "연결 안 됨"
+    : vaultStatus === "connected" ? `연결됨 · ${vaultHandleName ?? "볼트"}`
+    : vaultStatus === "needs-permission" ? "권한 재확인 필요"
+    : vaultStatus === "syncing" ? "동기화 중…"
+    : "오류 발생";
+
   return (
     <>
       <PageHead crumbs={[]} emoji="🔗" soft="var(--sky-soft)" title="연동 & 내보내기" subtitle="Obsidian, 마크다운 내보내기, 백엔드 연결" onEmoji={() => {}} />
@@ -2007,6 +2289,40 @@ function ProfileView() {
         <InfoCard title="노트 → Obsidian으로 열기" value="obsidian:// URI 지원" body="노트 편집 모달 하단의 '🟣 Obsidian' 버튼을 누르면 현재 노트가 Obsidian의 새 노트로 즉시 열립니다. 설정에서 볼트 이름을 지정하면 해당 볼트로 바로 연결됩니다." />
         <InfoCard title=".md 내보내기" value="YAML Frontmatter 포함" body="노트 편집 모달의 '⬇ .md' 버튼으로 YAML 메타데이터(제목, 날짜, 태그, 폴더 경로)가 포함된 마크다운 파일을 다운로드할 수 있습니다. 파일을 Obsidian 볼트 폴더에 놓으면 바로 인식됩니다." />
         <InfoCard title="Obsidian → 앱으로 가져오기" value="Local REST API 플러그인 필요" body="Obsidian Community Plugin인 'Local REST API'(포트 27123)를 설치하면 앱에서 볼트를 읽어 올 수 있는 방향으로 확장 가능합니다. 현재는 .md 파일 수동 복사 방식을 권장합니다." />
+      </div>
+      <h2 className="section-title">📂 볼트 폴더 실시간 동기화 (베타)</h2>
+      <div className="profile-grid">
+        <div className="info-card vault-card">
+          <span>구글드라이브로 동기화되는 옵시디언 볼트</span>
+          <b>{statusLabel}</b>
+          <p>
+            데스크탑 Chrome/Edge에서 옵시디언 볼트 폴더(구글드라이브 안의 폴더)를 한 번 연결하면,
+            노트가 저장될 때마다 볼트 안의 "{VAULT_SUBFOLDER}" 하위 폴더로 .md 파일이 자동으로 써집니다.
+            나머지는 구글드라이브가 다른 PC로 전파해줘요. 앱 → 볼트 방향의 단방향 동기화이며,
+            "{VAULT_SUBFOLDER}" 폴더 밖의 다른 파일은 건드리지 않습니다.
+          </p>
+          {vaultError && <p className="vault-error">⚠️ {vaultError}</p>}
+          <div className="vault-actions">
+            {!vaultSupported ? null : vaultStatus === "idle" ? (
+              <button type="button" className="btn btn-primary" onClick={onConnectVault}>볼트 폴더 연결</button>
+            ) : vaultStatus === "needs-permission" ? (
+              <>
+                <button type="button" className="btn btn-primary" onClick={onReconnectPermission}>권한 다시 허용</button>
+                <button type="button" className="btn-text" onClick={onDisconnectVault}>연결 해제</button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="btn btn-primary" disabled={vaultStatus === "syncing"} onClick={onSyncNowVault}>지금 동기화</button>
+                <label className="vault-autosync-toggle">
+                  <input type="checkbox" checked={vaultAutoSync} onChange={(e) => onToggleAutoSync(e.target.checked)} />
+                  저장할 때마다 자동 동기화
+                </label>
+                <button type="button" className="btn-text danger" onClick={onDisconnectVault}>연결 해제</button>
+              </>
+            )}
+          </div>
+          {vaultLastSync && <p className="vault-last-sync">마지막 동기화: {vaultLastSync}</p>}
+        </div>
       </div>
       <h2 className="section-title">💾 저장소 & 백엔드</h2>
       <div className="profile-grid">

@@ -2014,6 +2014,14 @@ body.sb-resizing .app-shell {
 .info-card b { display: block; margin-top: 7px; font-size: 24px; }
 .info-card p { color: var(--muted); font-size: 16px; line-height: 1.6; }
 
+.vault-card { grid-column: 1 / -1; }
+.vault-card b { font-size: 20px; }
+.vault-error { color: oklch(50% 0.15 15); font-weight: 700; }
+.vault-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.vault-autosync-toggle { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--fg); cursor: pointer; }
+.vault-autosync-toggle input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+.vault-last-sync { margin-top: 10px; font-size: 14px; color: var(--muted); }
+
 .modal-overlay {
   position: fixed;
   inset: 0;
