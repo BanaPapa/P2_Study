@@ -2469,8 +2469,8 @@ function inlineMdToHtml(text: string): string {
     else if (m[3] !== undefined) result += `<del>${esc(m[3])}</del>`;
     else if (m[4] !== undefined) result += `<code class="md-ic">${esc(m[4])}</code>`;
     else if (m[5] !== undefined) result += `<span class="md-wiki">${esc(m[5])}</span>`;
-    else if (m[6] !== undefined) result += `<span class="md-big">${esc(m[6])}</span>`;
-    else if (m[7] !== undefined) result += `<span class="md-small">${esc(m[7])}</span>`;
+    else if (m[6] !== undefined) result += `<span class="md-fs" style="font-size:19px">${esc(m[6])}</span>`;
+    else if (m[7] !== undefined) result += `<span class="md-fs" style="font-size:11px">${esc(m[7])}</span>`;
     else if (m[8] !== undefined) result += `<span class="md-fs" style="font-size:${m[8]}px">${esc(m[9] ?? '')}</span>`;
     last = m.index + m[0].length;
   }
@@ -2601,10 +2601,9 @@ function nodeToMd(node: Node): string {
     case 'code': return el.closest('pre') ? (el.textContent ?? '') : `\`${el.textContent ?? ''}\``;
     case 'span': {
       if (el.classList.contains('md-wiki')) return `[[${el.textContent ?? ''}]]`;
-      if (el.classList.contains('md-big')) return `{big}${inner()}{/big}`;
-      if (el.classList.contains('md-small')) return `{small}${inner()}{/small}`;
-      if (el.classList.contains('md-fs')) {
-        const sz = Math.round(parseFloat((el as HTMLElement).style?.fontSize) || 14);
+      if (el.classList.contains('md-fs') || el.classList.contains('md-big') || el.classList.contains('md-small')) {
+        let sz = Math.round(parseFloat((el as HTMLElement).style?.fontSize) || 0);
+        if (!sz) sz = el.classList.contains('md-big') ? 19 : el.classList.contains('md-small') ? 11 : 14;
         return `{fs:${sz}}${inner()}{/fs}`;
       }
       const style = el.getAttribute('style') ?? '';
@@ -2792,6 +2791,79 @@ function MarkdownToolbar({ taRef, value, onChange, allEntryTitles }: {
 }
 
 // ── WYSIWYG 툴바 ──────────────────────────────────────
+// 선택 영역의 글씨 크기를 delta(px)만큼 조절한다. 성공하면 true 반환.
+// - 실제 렌더링된 글씨 크기를 기준으로 상대 조절하므로 제목/기존 크기와 무관하게 예측 가능하게 동작한다.
+// - Range API 로 직접 DOM 을 조작하고 선택 영역을 복원하므로 execCommand 처럼 선택이 풀리지 않는다.
+// - 중첩된 md-fs span 은 제거해 마크다운 직렬화가 꼬이지 않는다.
+function adjustFontSize(root: HTMLElement, delta: number): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return false;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return false;
+
+  const startNode = range.startContainer;
+  const startEl = (startNode.nodeType === 3 ? startNode.parentElement : startNode) as HTMLElement | null;
+  const base = startEl ? parseFloat(getComputedStyle(startEl).fontSize) : 14;
+  const newSize = Math.max(8, Math.min(80, Math.round(base) + delta));
+
+  const frag = range.extractContents();
+
+  // 이미 크기가 지정된 span 은 풀어준다(새 절대 크기가 이를 대체).
+  frag.querySelectorAll('span.md-fs, span.md-big, span.md-small').forEach((span) => {
+    const parent = span.parentNode;
+    if (!parent) return;
+    while (span.firstChild) parent.insertBefore(span.firstChild, span);
+    parent.removeChild(span);
+  });
+
+  const BLOCK = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV']);
+  const makeSpan = (): HTMLSpanElement => {
+    const s = document.createElement('span');
+    s.className = 'md-fs';
+    s.style.fontSize = `${newSize}px`;
+    return s;
+  };
+
+  const topNodes = Array.from(frag.childNodes);
+  const hasBlocks = topNodes.some((n) => n.nodeType === 1 && BLOCK.has((n as HTMLElement).tagName));
+  const inserted: Node[] = [];
+
+  if (!hasBlocks) {
+    const span = makeSpan();
+    span.appendChild(frag);
+    range.insertNode(span);
+    inserted.push(span);
+  } else {
+    topNodes.forEach((node) => {
+      if (node.nodeType === 1 && BLOCK.has((node as HTMLElement).tagName)) {
+        const el = node as HTMLElement;
+        const span = makeSpan();
+        while (el.firstChild) span.appendChild(el.firstChild);
+        el.appendChild(span);
+        inserted.push(el);
+      } else if (node.nodeType === 3 && !(node.textContent ?? '').trim()) {
+        inserted.push(node);
+      } else {
+        const span = makeSpan();
+        span.appendChild(node);
+        inserted.push(span);
+      }
+    });
+    const out = document.createDocumentFragment();
+    inserted.forEach((n) => out.appendChild(n));
+    range.insertNode(out);
+  }
+
+  if (inserted.length) {
+    const r = document.createRange();
+    r.setStartBefore(inserted[0]);
+    r.setEndAfter(inserted[inserted.length - 1]);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  return true;
+}
+
 function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
   divRef: React.RefObject<HTMLDivElement | null>;
   sync: () => void;
@@ -2815,59 +2887,9 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
     sync();
   };
 
-  const wrapSpan = (className: string, placeholder: string) => {
+  const changeFontSize = (delta: number) => {
     focus();
-    const sel = window.getSelection();
-    if (!sel?.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    const hadSelection = !sel.isCollapsed;
-
-    if (!hadSelection) {
-      const tmpId = `tmp-${Math.random().toString(36).slice(2)}`;
-      document.execCommand('insertHTML', false, `<span id="${tmpId}" class="${className}">${esc(placeholder)}</span>`);
-      divRef.current?.querySelector(`#${tmpId}`)?.removeAttribute('id');
-      sync();
-      return;
-    }
-
-    // Preserve HTML structure of the selection instead of using plain text
-    const frag = range.cloneContents();
-    const inspector = document.createElement('div');
-    inspector.appendChild(frag);
-    const BLOCK_TAGS = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE']);
-    const hasTopBlocks = Array.from(inspector.childNodes).some(
-      n => n instanceof HTMLElement && BLOCK_TAGS.has(n.tagName)
-    );
-
-    if (!hasTopBlocks) {
-      // Inline selection: wrap in a single span
-      const tmpId = `tmp-${Math.random().toString(36).slice(2)}`;
-      document.execCommand('insertHTML', false, `<span id="${tmpId}" class="${className}">${inspector.innerHTML}</span>`);
-      const span = divRef.current?.querySelector(`#${tmpId}`);
-      if (span) {
-        span.removeAttribute('id');
-        const r = document.createRange();
-        r.selectNodeContents(span);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      }
-    } else {
-      // Multi-block: wrap each block's inner content individually to preserve structure
-      const parts: string[] = [];
-      inspector.childNodes.forEach(child => {
-        if (child instanceof HTMLElement && BLOCK_TAGS.has(child.tagName)) {
-          const outer = child.cloneNode(false) as HTMLElement;
-          outer.innerHTML = `<span class="${className}">${child.innerHTML}</span>`;
-          parts.push(outer.outerHTML);
-        } else {
-          const tmp = document.createElement('div');
-          tmp.appendChild(child.cloneNode(true));
-          parts.push(`<span class="${className}">${tmp.innerHTML}</span>`);
-        }
-      });
-      document.execCommand('insertHTML', false, parts.join(''));
-    }
-    sync();
+    if (divRef.current && adjustFontSize(divRef.current, delta)) sync();
   };
 
   const insertHr = (type: 'solid' | 'dashed' | 'dotted' | 'double' | 'deco') => {
@@ -2895,8 +2917,8 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
         <button type="button" className="tb" title="기울임 (Ctrl+I)" onClick={() => exec('italic')}><i>I</i></button>
         <button type="button" className="tb" title="취소선" onClick={() => exec('strikeThrough')}><s>S</s></button>
         <span className="tb-sep" />
-        <button type="button" className="tb" title="크게 (Ctrl+Shift+>)" onClick={() => wrapSpan('md-big', '큰 텍스트')}><b>A+</b></button>
-        <button type="button" className="tb" title="작게 (Ctrl+Shift+<)" onClick={() => wrapSpan('md-small', '작은 텍스트')}><small>a−</small></button>
+        <button type="button" className="tb" title="글씨 크게 (Ctrl+Shift+>)" onClick={() => changeFontSize(2)}><b>A+</b></button>
+        <button type="button" className="tb" title="글씨 작게 (Ctrl+Shift+<)" onClick={() => changeFontSize(-2)}><small>a−</small></button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="제목 1" onClick={() => exec('formatBlock', 'h1')}>H1</button>
         <button type="button" className="tb" title="제목 2" onClick={() => exec('formatBlock', 'h2')}>H2</button>
@@ -3193,59 +3215,10 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
     }
 
     // Ctrl+Shift+> / < → 글씨 크기 1px씩 증감 (선택 영역 유지)
-    if (e.ctrlKey && e.shiftKey && (e.key === '>' || e.key === '<')) {
+    if (e.ctrlKey && e.shiftKey && (e.key === '>' || e.key === '<' || e.key === '.' || e.key === ',')) {
       e.preventDefault();
-      if (sel.isCollapsed) return;
-      const dir = e.key === '>' ? 1 : -1;
-      const container = (range.commonAncestorContainer.nodeType === 3
-        ? range.commonAncestorContainer.parentElement
-        : range.commonAncestorContainer) as HTMLElement | null;
-      const fsSpan = container?.closest('span.md-fs') as HTMLElement | null;
-      if (fsSpan && divRef.current?.contains(fsSpan)) {
-        const cur = parseFloat(fsSpan.style.fontSize) || 14;
-        fsSpan.style.fontSize = `${Math.max(8, Math.min(72, cur + dir))}px`;
-        const r = document.createRange();
-        r.selectNodeContents(fsSpan);
-        sel.removeAllRanges();
-        sel.addRange(r);
-      } else {
-        const newSize = 14 + dir;
-        const style = `class="md-fs" style="font-size:${newSize}px"`;
-        const frag2 = range.cloneContents();
-        const inspector2 = document.createElement('div');
-        inspector2.appendChild(frag2);
-        const BLOCK_TAGS2 = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE']);
-        const hasTopBlocks2 = Array.from(inspector2.childNodes).some(
-          n => n instanceof HTMLElement && BLOCK_TAGS2.has(n.tagName)
-        );
-        if (!hasTopBlocks2) {
-          const tmpId = `tmp-${Math.random().toString(36).slice(2)}`;
-          document.execCommand('insertHTML', false, `<span id="${tmpId}" ${style}>${inspector2.innerHTML}</span>`);
-          const span = divRef.current?.querySelector(`#${tmpId}`) as HTMLElement | null;
-          if (span) {
-            span.removeAttribute('id');
-            const r = document.createRange();
-            r.selectNodeContents(span);
-            sel.removeAllRanges();
-            sel.addRange(r);
-          }
-        } else {
-          const parts: string[] = [];
-          inspector2.childNodes.forEach(child => {
-            if (child instanceof HTMLElement && BLOCK_TAGS2.has(child.tagName)) {
-              const outer = child.cloneNode(false) as HTMLElement;
-              outer.innerHTML = `<span ${style}>${child.innerHTML}</span>`;
-              parts.push(outer.outerHTML);
-            } else {
-              const tmp = document.createElement('div');
-              tmp.appendChild(child.cloneNode(true));
-              parts.push(`<span ${style}>${tmp.innerHTML}</span>`);
-            }
-          });
-          document.execCommand('insertHTML', false, parts.join(''));
-        }
-      }
-      sync();
+      const delta = (e.key === '>' || e.key === '.') ? 1 : -1;
+      if (divRef.current && adjustFontSize(divRef.current, delta)) sync();
       return;
     }
 

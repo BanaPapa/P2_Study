@@ -3631,8 +3631,7 @@ body.sb-resizing .app-shell {
 .wysiwyg-editor em, .wysiwyg-editor i { font-style: italic; }
 .wysiwyg-editor del, .wysiwyg-editor s { text-decoration: line-through; opacity: 0.6; }
 .wysiwyg-editor .md-wiki { color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
-.wysiwyg-editor .md-big { font-size: 1.35em; font-weight: 600; }
-.wysiwyg-editor .md-small { font-size: 0.78em; opacity: 0.75; }
+.wysiwyg-editor .md-fs { line-height: 1.4; }
 .wysiwyg-editor table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 0.93em; table-layout: fixed; }
 .wysiwyg-editor th { background: var(--surface-2); font-weight: 600; }
 .wysiwyg-editor td, .wysiwyg-editor th { border: 1px solid var(--border); padding: 4px 10px; }
