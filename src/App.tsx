@@ -173,7 +173,7 @@ const defaultSettings: Settings = {
   font: "pretendard",
   sidebarWidth: 300,
   navSize: 16,
-  bodySize: 14,
+  bodySize: 16,
   titleSize: 30,
   obsidianVault: ""
 };
@@ -2882,6 +2882,23 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
   const [showLinkPicker, setShowLinkPicker] = useState(false);
   const [showHrPicker, setShowHrPicker] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
+  const [curFontSize, setCurFontSize] = useState<number | null>(null);
+
+  useEffect(() => {
+    const update = () => {
+      if (!divRef.current) { setCurFontSize(null); return; }
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) { setCurFontSize(null); return; }
+      const range = sel.getRangeAt(0);
+      if (!divRef.current.contains(range.commonAncestorContainer)) { setCurFontSize(null); return; }
+      const ref: Node = range.startContainer;
+      const el = (ref.nodeType === 3 ? ref.parentElement : ref) as HTMLElement | null;
+      if (el) setCurFontSize(Math.round(parseFloat(getComputedStyle(el).fontSize)));
+      else setCurFontSize(null);
+    };
+    document.addEventListener('selectionchange', update);
+    return () => document.removeEventListener('selectionchange', update);
+  }, [divRef]);
 
   const focus = () => divRef.current?.focus();
 
@@ -2928,6 +2945,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
         <button type="button" className="tb" title="취소선" onClick={() => exec('strikeThrough')}><s>S</s></button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="글씨 크게 (Ctrl+Shift+>)" onClick={() => changeFontSize(2)}><b>A+</b></button>
+        {curFontSize !== null && <span className="tb-fs-badge">{curFontSize}px</span>}
         <button type="button" className="tb" title="글씨 작게 (Ctrl+Shift+<)" onClick={() => changeFontSize(-2)}><small>a−</small></button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="제목 1" onClick={() => exec('formatBlock', 'h1')}>H1</button>
