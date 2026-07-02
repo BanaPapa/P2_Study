@@ -2936,12 +2936,18 @@ function ConfirmDeleteModal({ node, onClose, onConfirm }: {
 
 type InlineToken = string | { kind: 'strong' | 'em' | 'del' | 'code' | 'wiki' | 'big' | 'small'; text: string } | { kind: 'fs'; text: string; size: number };
 
+// 같은 줄에서 짝을 못 찾아 일반 텍스트로 남은 서식 태그({fs:12}, {/fs} 등)를 제거한다.
+// 과거 버그로 여는 태그와 닫는 태그가 서로 다른 줄에 저장된 노트가 자연 복구되도록 한다.
+function stripOrphanTags(s: string): string {
+  return s.replace(/\{fs:\d+\}|\{\/fs\}|\{big\}|\{\/big\}|\{small\}|\{\/small\}/g, '');
+}
+
 function parseInline(text: string, onWiki?: (title: string) => void): JSX.Element {
   const tokens: InlineToken[] = [];
   const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let last = 0, m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) tokens.push(text.slice(last, m.index));
+    if (m.index > last) tokens.push(stripOrphanTags(text.slice(last, m.index)));
     if (m[1] !== undefined) tokens.push({ kind: 'strong', text: m[1] });
     else if (m[2] !== undefined) tokens.push({ kind: 'em', text: m[2] });
     else if (m[3] !== undefined) tokens.push({ kind: 'del', text: m[3] });
@@ -2952,22 +2958,22 @@ function parseInline(text: string, onWiki?: (title: string) => void): JSX.Elemen
     else if (m[8] !== undefined) tokens.push({ kind: 'fs', text: m[9] ?? '', size: parseInt(m[8], 10) });
     last = m.index + m[0].length;
   }
-  if (last < text.length) tokens.push(text.slice(last));
+  if (last < text.length) tokens.push(stripOrphanTags(text.slice(last)));
   return (
     <>{tokens.map((t, i) => {
       if (typeof t === 'string') return <span key={i}>{t}</span>;
-      if (t.kind === 'strong') return <strong key={i}>{t.text}</strong>;
-      if (t.kind === 'em') return <em key={i}>{t.text}</em>;
-      if (t.kind === 'del') return <del key={i}>{t.text}</del>;
+      if (t.kind === 'strong') return <strong key={i}>{parseInline(t.text, onWiki)}</strong>;
+      if (t.kind === 'em') return <em key={i}>{parseInline(t.text, onWiki)}</em>;
+      if (t.kind === 'del') return <del key={i}>{parseInline(t.text, onWiki)}</del>;
       if (t.kind === 'code') return <code key={i} className="md-ic">{t.text}</code>;
       if (t.kind === 'wiki') return (
         <button key={i} type="button" className="md-wikilink" onClick={() => onWiki?.(t.text)}>
           [[{t.text}]]
         </button>
       );
-      if (t.kind === 'big') return <span key={i} style={{ fontSize: '1.35em', fontWeight: 600 }}>{t.text}</span>;
-      if (t.kind === 'small') return <span key={i} style={{ fontSize: '0.78em', opacity: 0.75 }}>{t.text}</span>;
-      if (t.kind === 'fs') return <span key={i} style={{ fontSize: `${t.size}px` }}>{t.text}</span>;
+      if (t.kind === 'big') return <span key={i} style={{ fontSize: '1.35em', fontWeight: 600 }}>{parseInline(t.text, onWiki)}</span>;
+      if (t.kind === 'small') return <span key={i} style={{ fontSize: '0.78em', opacity: 0.75 }}>{parseInline(t.text, onWiki)}</span>;
+      if (t.kind === 'fs') return <span key={i} style={{ fontSize: `${t.size}px` }}>{parseInline(t.text, onWiki)}</span>;
       return null;
     })}</>
   );
@@ -2989,23 +2995,25 @@ function inlineMdToHtml(text: string): string {
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    result += esc(text.slice(last, m.index));
-    if (m[1] !== undefined) result += `<strong>${esc(m[1])}</strong>`;
-    else if (m[2] !== undefined) result += `<em>${esc(m[2])}</em>`;
-    else if (m[3] !== undefined) result += `<del>${esc(m[3])}</del>`;
+    result += esc(stripOrphanTags(text.slice(last, m.index)));
+    if (m[1] !== undefined) result += `<strong>${inlineMdToHtml(m[1])}</strong>`;
+    else if (m[2] !== undefined) result += `<em>${inlineMdToHtml(m[2])}</em>`;
+    else if (m[3] !== undefined) result += `<del>${inlineMdToHtml(m[3])}</del>`;
     else if (m[4] !== undefined) result += `<code class="md-ic">${esc(m[4])}</code>`;
     else if (m[5] !== undefined) result += `<span class="md-wiki">${esc(m[5])}</span>`;
-    else if (m[6] !== undefined) result += `<span class="md-fs" style="font-size:19px">${esc(m[6])}</span>`;
-    else if (m[7] !== undefined) result += `<span class="md-fs" style="font-size:11px">${esc(m[7])}</span>`;
-    else if (m[8] !== undefined) result += `<span class="md-fs" style="font-size:${m[8]}px">${esc(m[9] ?? '')}</span>`;
+    else if (m[6] !== undefined) result += `<span class="md-fs" style="font-size:19px">${inlineMdToHtml(m[6])}</span>`;
+    else if (m[7] !== undefined) result += `<span class="md-fs" style="font-size:11px">${inlineMdToHtml(m[7])}</span>`;
+    else if (m[8] !== undefined) result += `<span class="md-fs" style="font-size:${m[8]}px">${inlineMdToHtml(m[9] ?? '')}</span>`;
     last = m.index + m[0].length;
   }
-  return result + esc(text.slice(last));
+  return result + esc(stripOrphanTags(text.slice(last)));
 }
 
 function markdownToHtml(text: string): string {
   if (!text.trim()) return '<p><br></p>';
-  const lines = text.split('\n');
+  // Windows 클립보드/외부 텍스트의 \r\n·\r 줄바꿈을 정규화한다.
+  // \r 이 남으면 ^...$ 정규식($ 앞의 \r)이 실패해 ### 제목 등이 변환되지 않는다.
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const parts: string[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -3146,7 +3154,7 @@ function htmlToMarkdown(el: HTMLElement): string {
 }
 
 function MarkdownPreview({ text, onWikiLink }: { text: string; onWikiLink?: (title: string) => void }) {
-  const lines = text.split('\n');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
   const blocks: JSX.Element[] = [];
   let i = 0;
   while (i < lines.length) {
@@ -3352,16 +3360,32 @@ function adjustFontSize(root: HTMLElement, delta: number): boolean {
     parent.removeChild(span);
   });
 
-  const BLOCK = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV']);
+  const BLOCK = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'PRE', 'DIV', 'TD', 'TH']);
+  // ul/ol/table 등은 그 자체가 한 줄이 아니라 여러 줄(li/tr)로 직렬화되는 컨테이너다.
+  // 이걸 통째로 하나의 span 으로 감싸면 {fs:}...{/fs} 여는/닫는 태그가 서로 다른 줄에 떨어져
+  // 마크다운 재파싱(줄 단위) 시 태그가 깨지고 별표(**) 등이 그대로 노출된다.
+  // 반드시 내부의 li/td/th 각각을 개별적으로 감싸 태그가 한 줄 안에서 열리고 닫히게 해야 한다.
+  const CONTAINER = new Set(['UL', 'OL', 'TABLE', 'THEAD', 'TBODY', 'TR']);
   const makeSpan = (): HTMLSpanElement => {
     const s = document.createElement('span');
     s.className = 'md-fs';
     s.style.fontSize = `${newSize}px`;
     return s;
   };
+  const wrapChildrenInSpan = (el: HTMLElement) => {
+    const span = makeSpan();
+    while (el.firstChild) span.appendChild(el.firstChild);
+    el.appendChild(span);
+  };
+  const wrapBlocksIn = (node: Node) => {
+    if (node.nodeType !== 1) return;
+    const el = node as HTMLElement;
+    if (CONTAINER.has(el.tagName)) { Array.from(el.children).forEach(wrapBlocksIn); return; }
+    wrapChildrenInSpan(el);
+  };
 
   const topNodes = Array.from(frag.childNodes);
-  const hasBlocks = topNodes.some((n) => n.nodeType === 1 && BLOCK.has((n as HTMLElement).tagName));
+  const hasBlocks = topNodes.some((n) => n.nodeType === 1 && (BLOCK.has((n as HTMLElement).tagName) || CONTAINER.has((n as HTMLElement).tagName)));
   const inserted: Node[] = [];
 
   if (!hasBlocks) {
@@ -3371,12 +3395,10 @@ function adjustFontSize(root: HTMLElement, delta: number): boolean {
     inserted.push(span);
   } else {
     topNodes.forEach((node) => {
-      if (node.nodeType === 1 && BLOCK.has((node as HTMLElement).tagName)) {
-        const el = node as HTMLElement;
-        const span = makeSpan();
-        while (el.firstChild) span.appendChild(el.firstChild);
-        el.appendChild(span);
-        inserted.push(el);
+      const tag = node.nodeType === 1 ? (node as HTMLElement).tagName : '';
+      if (BLOCK.has(tag) || CONTAINER.has(tag)) {
+        wrapBlocksIn(node);
+        inserted.push(node);
       } else if (node.nodeType === 3 && !(node.textContent ?? '').trim()) {
         inserted.push(node);
       } else {
