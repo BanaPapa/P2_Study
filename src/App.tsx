@@ -1323,6 +1323,7 @@ function App() {
         onDeleteEntry={deleteEntry}
         onSaveCategory={saveCategory}
         onDeleteNode={deleteNode}
+        onOpenSettings={() => setModal({ kind: "settings" })}
         maxDepth={MAX_DEPTH}
         backRef={mobileBackRef}
       />
@@ -2127,6 +2128,7 @@ function MobileShell(props: {
   onDeleteEntry: (nodeId: string, entryId: string) => void;
   onSaveCategory: (parentId: string | undefined, name: string, leaf: boolean, emoji: string, initialEntry?: StudyEntry) => void;
   onDeleteNode: (nodeId: string) => void;
+  onOpenSettings: () => void;
   maxDepth: number;
   backRef: React.MutableRefObject<(() => boolean) | null>;
 }) {
@@ -2341,6 +2343,11 @@ function MobileShell(props: {
           <div><h2>내정보</h2><p>계정·동기화 정보</p></div>
         </div>
         <div className="cat-grid">
+          <button className="cat-card" onClick={props.onOpenSettings}>
+            <div className="ic" style={{ background: "var(--rose-soft)" }}>⚙️</div>
+            <div className="tx"><h4>설정</h4><p>테마 · 글꼴 · 데이터 백업·복구</p></div>
+            <Chev />
+          </button>
           <div className="cat-card"><div className="ic" style={{ background: "var(--accent-soft)" }}>💾</div><div className="tx"><h4>실시간 동기화</h4><p>Convex 서버 · 모든 기기 즉시 반영</p></div></div>
           <div className="cat-card"><div className="ic" style={{ background: "var(--mint-soft)" }}>📝</div><div className="tx"><h4>마크다운 에디터</h4><p>서식·글씨 크기·표·체크박스 지원</p></div></div>
           <div className="cat-card"><div className="ic" style={{ background: "var(--sky-soft)" }}>🟣</div><div className="tx"><h4>내보내기</h4><p>노트 편집 화면에서 .md 저장 · Obsidian 열기</p></div></div>
