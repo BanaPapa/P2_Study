@@ -1682,14 +1682,56 @@ function SplashScreen() {
   );
 }
 
+// 카카오톡·인스타그램 등 앱 내장 브라우저(WebView) 감지.
+// 구글은 보안 정책상 WebView 에서의 OAuth 로그인을 차단한다(403 disallowed_useragent).
+function detectInAppBrowser(): "kakaotalk" | "line" | "other" | null {
+  const ua = navigator.userAgent;
+  if (/KAKAOTALK/i.test(ua)) return "kakaotalk";
+  if (/\bLine\//i.test(ua)) return "line";
+  if (/Instagram|FBAN|FBAV|FB_IAB|NAVER\(inapp|DaumApps|Everytimeapp|trill|; wv\)/i.test(ua)) return "other";
+  return null;
+}
+
+// 인앱 브라우저에서 기본(외부) 브라우저로 현재 페이지를 다시 연다.
+function openInExternalBrowser(kind: "kakaotalk" | "line" | "other") {
+  const url = window.location.href;
+  if (kind === "kakaotalk") {
+    window.location.href = `kakaotalk://web/openExternal?url=${encodeURIComponent(url)}`;
+    return;
+  }
+  if (kind === "line") {
+    window.location.href = url + (url.includes("?") ? "&" : "?") + "openExternalBrowser=1";
+    return;
+  }
+  if (/android/i.test(navigator.userAgent)) {
+    const stripped = url.replace(/^https?:\/\//, "");
+    window.location.href = `intent://${stripped}#Intent;scheme=https;end`;
+  }
+}
+
 function LoginPage() {
   const { signIn } = useAuthActions();
+  const inApp = detectInAppBrowser();
+  const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent);
   return (
     <div className="login-page">
       <div className="login-box">
         <div className="login-logo">📖</div>
         <h1>몽글 Study</h1>
         <p>소셜 계정으로 로그인하면<br />모든 기기에서 실시간 동기화됩니다</p>
+        {inApp && (
+          <div className="inapp-warn">
+            <b>⚠️ 앱 내장 브라우저에서는 Google 로그인이 차단됩니다</b>
+            <span>구글 보안 정책 때문이에요. 카카오 로그인은 그대로 사용할 수 있고, Google/GitHub 로그인은 외부 브라우저에서 열어주세요.</span>
+            {(inApp === "kakaotalk" || inApp === "line" || !isIos) ? (
+              <button type="button" className="inapp-open-btn" onClick={() => openInExternalBrowser(inApp)}>
+                🌐 Chrome·기본 브라우저로 열기
+              </button>
+            ) : (
+              <span className="inapp-guide">우측 상단 ⋯ 메뉴 → "Safari로 열기"를 눌러주세요</span>
+            )}
+          </div>
+        )}
         <div className="login-btns">
           <button className="login-btn google" onClick={() => signIn("google", { redirectTo: "/" })}>
             <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>

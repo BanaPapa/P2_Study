@@ -44,6 +44,29 @@
 .login-box h1 { margin: 0 0 8px; font-size: 24px; }
 .login-box p { margin: 0 0 28px; color: var(--muted); font-size: 14px; line-height: 1.7; }
 
+.inapp-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: oklch(96% 0.04 85);
+  border: 1px solid oklch(85% 0.09 85);
+  text-align: left;
+}
+.inapp-warn b { font-size: 13px; color: oklch(40% 0.1 60); }
+.inapp-warn span { font-size: 12px; line-height: 1.6; color: var(--muted); }
+.inapp-warn .inapp-guide { font-weight: 700; color: oklch(40% 0.1 60); }
+.inapp-open-btn {
+  margin-top: 2px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
 .login-btns { display: flex; flex-direction: column; gap: 10px; width: 100%; }
 
 .login-btn {
