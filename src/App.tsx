@@ -1605,12 +1605,9 @@ function App() {
         onAdd={openAddFor}
         onAddEntry={(nodeId) => setModal({ kind: "entry", nodeId })}
         onEditEntry={(nodeId, entryId) => setModal({ kind: "entry", nodeId, entryId })}
-        onSaveEntry={saveEntry}
         onDeleteEntry={deleteEntry}
         onSaveCategory={saveCategory}
         onDeleteNode={deleteNode}
-        say={say}
-        searchTag={(tag) => setQuery(`#${tag}`)}
         maxDepth={MAX_DEPTH}
       />
 
@@ -2360,17 +2357,14 @@ function MobileShell(props: {
   onAdd: (id?: string) => void;
   onAddEntry: (id: string) => void;
   onEditEntry: (nodeId: string, entryId: string) => void;
-  onSaveEntry: (nodeId: string, entry: StudyEntry) => void;
   onDeleteEntry: (nodeId: string, entryId: string) => void;
   onSaveCategory: (parentId: string | undefined, name: string, leaf: boolean, emoji: string, initialEntry?: StudyEntry) => void;
   onDeleteNode: (nodeId: string) => void;
-  say: (message: string) => void;
-  searchTag: (tag: string) => void;
   maxDepth: number;
 }) {
   const selected = findNode(props.nodes, props.selectedId)?.node;
   const [routeStack, setRouteStack] = useState<{ route: MobileRoute; selectedId?: string }[]>([]);
-  const [sheet, setSheet] = useState<null | "ctx" | "add" | "entry" | "emoji">(null);
+  const [sheet, setSheet] = useState<null | "ctx" | "add" | "emoji">(null);
   const [ctxNodeId, setCtxNodeId] = useState<string | undefined>();
   const [ctxEntryId, setCtxEntryId] = useState<string | undefined>();
   const [addParentId, setAddParentId] = useState<string | undefined>();
@@ -2383,13 +2377,6 @@ function MobileShell(props: {
   const [addEntryBody, setAddEntryBody] = useState("- ");
   const [addEntryTags, setAddEntryTags] = useState<string[]>([]);
   const [addTagDraft, setAddTagDraft] = useState("");
-  const [entryNodeId, setEntryNodeId] = useState<string | undefined>();
-  const [entryId, setEntryId] = useState<string | undefined>();
-  const [entryTitle, setEntryTitle] = useState("");
-  const [entryDate, setEntryDate] = useState(todayISO());
-  const [entryBody, setEntryBody] = useState("- ");
-  const [entryTags, setEntryTags] = useState<string[]>([]);
-  const [tagDraft, setTagDraft] = useState("");
   const [toastText, setToastText] = useState("");
   const ctxNode = findNode(props.nodes, ctxNodeId)?.node;
   const ctxEntry = ctxNode?.entries?.find((entry) => entry.id === ctxEntryId);
@@ -2474,36 +2461,12 @@ function MobileShell(props: {
     setSheet("add");
   };
 
+  // 데스크탑과 동일한 공유 노트 모달(EntryModal)을 연다.
+  // 서식 에디터·글씨 크기·붙여넣기 변환·첨부·내보내기까지 모바일에서도 그대로 쓸 수 있다.
   const openEntrySheet = (nodeId: string, nextEntryId?: string) => {
-    const node = findNode(props.nodes, nodeId)?.node;
-    const existing = node?.entries?.find((entry) => entry.id === nextEntryId);
-    setEntryNodeId(nodeId);
-    setEntryId(nextEntryId);
-    setEntryTitle(existing?.title ?? "");
-    setEntryDate(existing?.date ?? todayISO());
-    setEntryBody(existing?.body ?? "- ");
-    setEntryTags(existing?.tags ?? []);
-    setTagDraft("");
-    setSheet("entry");
-  };
-
-  const saveMobileEntry = () => {
-    if (!entryNodeId || !entryTitle.trim()) {
-      props.say("제목을 입력해주세요");
-      return;
-    }
-    const node = findNode(props.nodes, entryNodeId)?.node;
-    const existing = node?.entries?.find((entry) => entry.id === entryId);
-    props.onSaveEntry(entryNodeId, {
-      id: existing?.id ?? id("e"),
-      title: entryTitle.trim(),
-      date: entryDate || todayISO(),
-      body: entryBody.trim(),
-      attachments: existing?.attachments ?? [],
-      tags: [...entryTags]
-    });
     setSheet(null);
-    props.setRoute("leaf");
+    if (nextEntryId) props.onEditEntry(nodeId, nextEntryId);
+    else props.onAddEntry(nodeId);
   };
 
   const saveMobileCategory = () => {
@@ -2589,12 +2552,12 @@ function MobileShell(props: {
       <div className="view active" id="v-me">
         <div className="detail-head">
           <div className="badge" style={{ background: "var(--sky-soft)" }}>🔗</div>
-          <div><h2>내정보</h2><p>옵시디언·노트북LM 연동 준비중</p></div>
+          <div><h2>내정보</h2><p>계정·동기화 정보</p></div>
         </div>
         <div className="cat-grid">
-          <div className="cat-card"><div className="ic" style={{ background: "var(--accent-soft)" }}>💾</div><div className="tx"><h4>현재 저장소</h4><p>브라우저 localStorage</p></div></div>
-          <div className="cat-card"><div className="ic" style={{ background: "var(--mint-soft)" }}>🗄️</div><div className="tx"><h4>백엔드 후보</h4><p>Supabase 또는 Convex 연결 예정</p></div></div>
-          <div className="cat-card"><div className="ic" style={{ background: "var(--sky-soft)" }}>📝</div><div className="tx"><h4>옵시디언</h4><p>노트 URI와 첨부 메타데이터 연결 예정</p></div></div>
+          <div className="cat-card"><div className="ic" style={{ background: "var(--accent-soft)" }}>💾</div><div className="tx"><h4>실시간 동기화</h4><p>Convex 서버 · 모든 기기 즉시 반영</p></div></div>
+          <div className="cat-card"><div className="ic" style={{ background: "var(--mint-soft)" }}>📝</div><div className="tx"><h4>마크다운 에디터</h4><p>서식·글씨 크기·표·체크박스 지원</p></div></div>
+          <div className="cat-card"><div className="ic" style={{ background: "var(--sky-soft)" }}>🟣</div><div className="tx"><h4>내보내기</h4><p>노트 편집 화면에서 .md 저장 · Obsidian 열기</p></div></div>
         </div>
       </div>
     );
@@ -2689,33 +2652,6 @@ function MobileShell(props: {
             <div className="sheet-btns">
               <button className="btn-cancel" onClick={() => setSheet(null)}>취소</button>
               <button className="btn-ok" onClick={saveMobileCategory}>추가</button>
-            </div>
-          </div>
-          <div className={`sheet ${sheet === "entry" ? "show" : ""}`} style={{ maxHeight: "90%" }}>
-            <div className="handle" />
-            <div className="sheet-title">{entryId ? "노트 편집" : "새 노트"}</div>
-            <div className="es-scroll">
-              <label className="es-label">제목</label>
-              <input className="es-input" value={entryTitle} onChange={(event) => setEntryTitle(event.target.value)} placeholder="오늘 공부한 내용의 제목" />
-              <label className="es-label">날짜</label>
-              <input className="es-input" type="date" value={entryDate} onChange={(event) => setEntryDate(event.target.value)} />
-              <label className="es-label">내용</label>
-              <textarea className="es-input" value={entryBody} onChange={(event) => setEntryBody(event.target.value)} placeholder={"- 공부 내용을 메모하세요\n줄 앞에 '- '를 붙이면 목록이 됩니다"} />
-              <label className="es-label">태그</label>
-              <div className="tag-row">{entryTags.map((tag) => <span className="tag-pill-rm" key={tag}>#{tag}<button onClick={() => setEntryTags(entryTags.filter((item) => item !== tag))}>×</button></span>)}</div>
-              <div className="tag-add-row">
-                <input className="tag-add-inp" value={tagDraft} onChange={(event) => setTagDraft(event.target.value)} placeholder="태그 입력" />
-                <button className="tag-add-btn" onClick={() => {
-                  const next = tagDraft.trim().replace(/^#/, "");
-                  if (next && !entryTags.includes(next)) setEntryTags([...entryTags, next]);
-                  setTagDraft("");
-                }}>+</button>
-              </div>
-            </div>
-            <div className="sheet-btns" style={{ marginTop: 16 }}>
-              {entryId && entryNodeId && <button className="btn-del" onClick={() => { props.onDeleteEntry(entryNodeId, entryId); setSheet(null); }}>삭제</button>}
-              <button className="btn-cancel" onClick={() => setSheet(null)}>취소</button>
-              <button className="btn-save" onClick={saveMobileEntry}>저장</button>
             </div>
           </div>
           <div className={`em-picker ${sheet === "emoji" ? "show" : ""}`}>
@@ -2867,7 +2803,7 @@ function MobileEntryCard({ entry, onDouble, longPress, longPressHandlers }: {
 }) {
   const icon = { doc: "📄", video: "🎬", link: "🔗" } satisfies Record<AttachmentType, string>;
   return (
-    <div className="ecard" data-eid={entry.id} onDoubleClick={onDouble} {...longPressHandlers(longPress)}>
+    <div className="ecard" data-eid={entry.id} onClick={onDouble} {...longPressHandlers(longPress)}>
       <h3><span className="tk">✓</span>{entry.title}</h3>
       <div className="bd"><MarkdownPreview text={entry.body} /></div>
       {entry.attachments.length ? <div className="att">{entry.attachments.map((attachment) => <span className={`chip ${attachment.type}`} key={attachment.id}>{icon[attachment.type]} {attachment.name}</span>)}</div> : null}
