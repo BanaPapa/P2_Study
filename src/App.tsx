@@ -2073,9 +2073,13 @@ function EntryCard({ entry, onEdit }: { entry: StudyEntry; onEdit: () => void })
       window.setTimeout(() => e.currentTarget.classList.remove("pulse"), 300);
     }}>
       <h3><span className="tick">✓</span>{entry.title}</h3>
-      <p className="body body-summary">
-        {entry.body.replace(/^[-*]\s*/gm, "").replace(/\n+/g, " ").trim() || "내용 없음"}
-      </p>
+      <div className="body body-summary">
+        {(() => {
+          const lines = mdToSummaryLines(entry.body, 3);
+          if (!lines.length) return <span className="sum-line">내용 없음</span>;
+          return lines.map((line, i) => <span className="sum-line" key={i}>{line}</span>);
+        })()}
+      </div>
       {entry.attachments.length ? (
         <div className="attach">
           {entry.attachments.map((attachment) => <span className={`chip ${attachment.type}`} key={attachment.id}>{icon[attachment.type]} {attachment.name}</span>)}
@@ -2102,7 +2106,7 @@ function SearchView({ query, results, nodes, onOpen }: {
           <button className="search-hit" key={entry.id} onClick={() => onOpen(node.id)}>
             <span className="search-hit-path">{pathTo(nodes, node.id).map((n) => n.name).join(" › ")}</span>
             <b>{entry.title}</b>
-            <span>{entry.body.replace(/^[-*]\s*/gm, "").replace(/\n+/g, " ").slice(0, 110)}</span>
+            <span>{mdToSummaryLines(entry.body, 4).join(' ').slice(0, 110)}</span>
             <small>{fmt(entry.date)} · {(entry.tags ?? []).map((tag) => `#${tag}`).join(" ")}</small>
           </button>
         )) : <EmptyState title="결과가 없어요" body="제목·내용·태그를 모두 검색해봤어요" emoji="🔍" />}
@@ -2942,9 +2946,40 @@ function stripOrphanTags(s: string): string {
   return s.replace(/\{fs:\d+\}|\{\/fs\}|\{big\}|\{\/big\}|\{small\}|\{\/small\}/g, '');
 }
 
+// 노트 본문 마크다운을 요약 카드/검색 결과용 순수 텍스트 줄 목록으로 변환한다.
+// 서식 문법(**, ###, ``` 등)은 내부 구조이므로 사용자에게 노출하지 않는다.
+function mdToSummaryLines(md: string, maxLines: number): string[] {
+  const out: string[] = [];
+  for (const raw of md.replace(/\r\n?/g, '\n').split('\n')) {
+    if (out.length >= maxLines) break;
+    const line = raw.trim();
+    if (line.startsWith('```')) continue; // 코드 펜스 마커는 숨기고 내용은 보여준다
+    if (!line || /^\*{2,}$/.test(line)) continue;
+    if (/^(-{3,}|- - -|· · ·|= = =|\* \* \*)(\s+w\d+)?$/.test(line)) continue; // 구분선
+    if (/^\|[\s:|-]+\|$/.test(line)) continue;                                 // 표 구분행
+    const plain = stripOrphanTags(line)
+      .replace(/^#{1,3}\s+/, '')            // 제목
+      .replace(/^>\s+/, '')                 // 인용
+      .replace(/^[-*]\s+\[[x ]\]\s+/i, '')  // 체크박스
+      .replace(/^[-*]\s+/, '')              // 목록
+      .replace(/^\d+\.\s+/, '')             // 번호 목록
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/\*([^*]+?)\*/g, '$1')
+      .replace(/~~(.+?)~~/g, '$1')
+      .replace(/`(.+?)`/g, '$1')
+      .replace(/\[\[(.+?)\]\]/g, '$1')
+      .replace(/\|/g, ' · ')
+      .trim();
+    if (plain) out.push(plain);
+  }
+  return out;
+}
+
 function parseInline(text: string, onWiki?: (title: string) => void): JSX.Element {
   const tokens: InlineToken[] = [];
-  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
+  // 기울임은 \*([^*]+?)\* 로 제한: 별표만 남은 잔해('**','***')가 기울임으로
+  // 오인 매칭되어 저장할 때마다 별표 개수가 변형되는 것을 막는다.
+  const re = /\*\*(.+?)\*\*|\*([^*]+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let last = 0, m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) tokens.push(stripOrphanTags(text.slice(last, m.index)));
@@ -2990,7 +3025,9 @@ function parseTableRow(line: string): string[] {
 function esc(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
 function inlineMdToHtml(text: string): string {
-  const re = /\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
+  // 기울임은 \*([^*]+?)\* 로 제한: 별표만 남은 잔해('**','***')가 기울임으로
+  // 오인 매칭되어 저장할 때마다 별표 개수가 변형되는 것을 막는다.
+  const re = /\*\*(.+?)\*\*|\*([^*]+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let result = '';
   let last = 0;
   let m: RegExpExecArray | null;
@@ -3067,7 +3104,8 @@ function markdownToHtml(text: string): string {
       parts.push(`<table class="md-table"><thead><tr>${headers.map((h, idx) => `<th${colWidths[idx] ? ` style="width:${colWidths[idx]}"` : ''}>${inlineMdToHtml(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${inlineMdToHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
       continue;
     }
-    if (!line.trim()) { parts.push('<div class="md-gap"><br></div>'); i++; continue; }
+    // 별표만 남은 줄('**','***' 등)은 과거 버그가 남긴 잔해 → 빈 줄로 취급해 자연 복구
+    if (!line.trim() || /^\*{2,}$/.test(line.trim())) { parts.push('<div class="md-gap"><br></div>'); i++; continue; }
     parts.push(`<p class="md-p">${inlineMdToHtml(line)}</p>`); i++;
   }
   return parts.join('') || '<p><br></p>';
@@ -3129,20 +3167,28 @@ function nodeToMd(node: Node): string {
       const sep = hasWidths ? colWidths.map(w => w ? `--w:${w}--` : '------').join('|') : ths.map(() => '------').join('|');
       return `| ${ths.join(' | ')} |\n|${sep}|\n${trs.map(r => `| ${r.join(' | ')} |`).join('\n')}`;
     }
-    case 'strong': case 'b': return `**${inner()}**`;
-    case 'em': case 'i': return `*${inner()}*`;
-    case 'del': case 's': case 'strike': return `~~${inner()}~~`;
-    case 'code': return el.closest('pre') ? (el.textContent ?? '') : `\`${el.textContent ?? ''}\``;
+    // 내용이 빈 인라인 요소는 마커 없이 내용만 반환한다.
+    // 선택 영역을 잘라낼 때 남는 빈 <strong></strong> 껍데기가 '****' 로 저장되어
+    // 재열기 때 별표가 그대로 노출되는 것을 막는다.
+    case 'strong': case 'b': { const v = inner(); return v.trim() ? `**${v}**` : v; }
+    case 'em': case 'i': { const v = inner(); return v.trim() ? `*${v}*` : v; }
+    case 'del': case 's': case 'strike': { const v = inner(); return v.trim() ? `~~${v}~~` : v; }
+    case 'code': {
+      if (el.closest('pre')) return el.textContent ?? '';
+      const v = el.textContent ?? '';
+      return v.trim() ? `\`${v}\`` : v;
+    }
     case 'span': {
       if (el.classList.contains('md-wiki')) return `[[${el.textContent ?? ''}]]`;
       if (el.classList.contains('md-fs') || el.classList.contains('md-big') || el.classList.contains('md-small')) {
         let sz = Math.round(parseFloat((el as HTMLElement).style?.fontSize) || 0);
         if (!sz) sz = el.classList.contains('md-big') ? 19 : el.classList.contains('md-small') ? 11 : 14;
-        return `{fs:${sz}}${inner()}{/fs}`;
+        const v = inner();
+        return v.trim() ? `{fs:${sz}}${v}{/fs}` : v;
       }
       const style = el.getAttribute('style') ?? '';
-      if (/font-weight\s*:\s*(bold|700)/i.test(style)) return `**${inner()}**`;
-      if (/font-style\s*:\s*italic/i.test(style)) return `*${inner()}*`;
+      if (/font-weight\s*:\s*(bold|700)/i.test(style)) { const v = inner(); return v.trim() ? `**${v}**` : v; }
+      if (/font-style\s*:\s*italic/i.test(style)) { const v = inner(); return v.trim() ? `*${v}*` : v; }
       return inner();
     }
     default: return inner();
@@ -3219,7 +3265,7 @@ function MarkdownPreview({ text, onWikiLink }: { text: string; onWikiLink?: (tit
       );
       continue;
     }
-    if (!line.trim()) { blocks.push(<div key={i} className="md-gap" />); i++; continue; }
+    if (!line.trim() || /^\*{2,}$/.test(line.trim())) { blocks.push(<div key={i} className="md-gap" />); i++; continue; }
     blocks.push(<p key={i} className="md-p">{parseInline(line, onWikiLink)}</p>); i++;
   }
   return <div className="md-preview">{blocks}</div>;
@@ -3411,6 +3457,12 @@ function adjustFontSize(root: HTMLElement, delta: number): boolean {
     inserted.forEach((n) => out.appendChild(n));
     range.insertNode(out);
   }
+
+  // extractContents 가 경계에서 쪼개고 남긴 빈 서식 껍데기(<strong></strong> 등)를 정리한다.
+  // 그대로 두면 '****' 로 직렬화되어 재열기 때 별표가 노출된다.
+  root.querySelectorAll('strong, b, em, i, del, s, strike').forEach((el) => {
+    if (!el.textContent && !el.querySelector('br, img, input')) el.remove();
+  });
 
   if (inserted.length) {
     const r = document.createRange();
