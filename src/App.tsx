@@ -2053,24 +2053,21 @@ function ProfileView({
 
   return (
     <>
-      <PageHead crumbs={[]} emoji="🔗" soft="var(--sky-soft)" title="연동 & 내보내기" subtitle="Obsidian, 마크다운 내보내기, 백엔드 연결" onEmoji={() => {}} />
-      <h2 className="section-title">🟣 Obsidian 연동</h2>
-      <div className="profile-grid">
-        <InfoCard title="노트 → Obsidian으로 열기" value="obsidian:// URI 지원" body="노트 편집 모달 하단의 '🟣 Obsidian' 버튼을 누르면 현재 노트가 Obsidian의 새 노트로 즉시 열립니다. 설정에서 볼트 이름을 지정하면 해당 볼트로 바로 연결됩니다." />
-        <InfoCard title=".md 내보내기" value="YAML Frontmatter 포함" body="노트 편집 모달의 '⬇ .md' 버튼으로 YAML 메타데이터(제목, 날짜, 태그, 폴더 경로)가 포함된 마크다운 파일을 다운로드할 수 있습니다. 파일을 Obsidian 볼트 폴더에 놓으면 바로 인식됩니다." />
-        <InfoCard title="Obsidian → 앱으로 가져오기" value="Local REST API 플러그인 필요" body="Obsidian Community Plugin인 'Local REST API'(포트 27123)를 설치하면 앱에서 볼트를 읽어 올 수 있는 방향으로 확장 가능합니다. 현재는 .md 파일 수동 복사 방식을 권장합니다." />
-      </div>
-      <h2 className="section-title">📂 볼트 폴더 실시간 동기화 (베타)</h2>
+      <PageHead crumbs={[]} emoji="🔗" soft="var(--sky-soft)" title="연동 & 내보내기" subtitle="Obsidian 볼트 동기화와 노트 내보내기" onEmoji={() => {}} />
+      <h2 className="section-title">📂 Obsidian 볼트 폴더 동기화</h2>
       <div className="profile-grid">
         <div className="info-card vault-card">
-          <span>구글드라이브로 동기화되는 옵시디언 볼트</span>
+          <span>노트를 저장할 때마다 볼트로 .md 자동 저장</span>
           <b>{statusLabel}</b>
           <p>
-            데스크탑 Chromium 계열 브라우저(Chrome, Edge, Opera 등)에서 옵시디언 볼트 폴더(구글드라이브 안의 폴더)를 한 번 연결하면,
-            노트가 저장될 때마다 볼트 안의 "{VAULT_SUBFOLDER}" 하위 폴더로 .md 파일이 자동으로 써집니다.
-            나머지는 구글드라이브가 다른 PC로 전파해줘요. 앱 → 볼트 방향의 단방향 동기화이며,
-            "{VAULT_SUBFOLDER}" 폴더 밖의 다른 파일은 건드리지 않습니다.
-            (Brave는 기본적으로 이 기능이 꺼져 있어요 — brave://flags에서 "File System Access API"를 켠 뒤 재시작하면 사용할 수 있습니다.)
+            옵시디언 볼트 폴더를 한 번 연결해두면, 노트가 저장될 때마다 볼트 안의
+            "{VAULT_SUBFOLDER}" 폴더에 .md 파일이 자동으로 써집니다(앱 → 볼트 단방향).
+            그 폴더 밖의 파일은 건드리지 않아요. 볼트가 구글드라이브 등으로 동기화되고 있다면
+            다른 PC에도 자동으로 전파됩니다.
+          </p>
+          <p className="vault-hint-small">
+            데스크탑 Chrome·Edge·Opera에서 사용할 수 있어요.
+            Brave는 brave://flags에서 "File System Access API"를 켠 뒤 재시작해야 합니다.
           </p>
           {vaultError && <p className="vault-error">⚠️ {vaultError}</p>}
           <div className="vault-actions">
@@ -2095,10 +2092,14 @@ function ProfileView({
           {vaultLastSync && <p className="vault-last-sync">마지막 동기화: {vaultLastSync}</p>}
         </div>
       </div>
-      <h2 className="section-title">💾 저장소 & 백엔드</h2>
+      <h2 className="section-title">🟣 노트 하나씩 내보내기</h2>
       <div className="profile-grid">
-        <InfoCard title="현재 저장소" value="Convex 실시간 동기화" body="로그인 후 모든 데이터가 Convex 서버에 실시간으로 동기화됩니다. 여러 기기에서 즉시 반영됩니다." />
-        <InfoCard title="마크다운 에디터" value="노션 스타일 서식 지원" body="**굵게**, *기울임*, ~~취소선~~, # 제목, - 목록, - [ ] 체크박스, > 인용, --- 구분선, `코드`를 직접 입력하거나 툴바를 활용하세요. 미리보기 모드로 결과를 확인할 수 있습니다." />
+        <InfoCard title="Obsidian으로 열기" value="노트 편집 화면 → 🟣 Obsidian 버튼" body="현재 노트가 Obsidian의 새 노트로 즉시 열립니다. 설정에서 볼트 이름을 지정하면 해당 볼트로 바로 연결돼요." />
+        <InfoCard title=".md 파일로 저장" value="노트 편집 화면 → ⬇ .md 버튼" body="제목·날짜·태그·폴더 경로가 담긴 마크다운 파일로 다운로드됩니다. Obsidian 볼트 폴더에 넣으면 바로 인식돼요." />
+      </div>
+      <h2 className="section-title">💾 데이터 저장</h2>
+      <div className="profile-grid">
+        <InfoCard title="실시간 동기화" value="Convex 서버" body="로그인하면 모든 데이터가 서버에 실시간 저장되고 모든 기기에 즉시 반영됩니다. 저장 시점마다 서버에 이력이 남고, 전체 백업·복구는 ⚙️ 설정 > 데이터 백업·복구에서 할 수 있어요." />
       </div>
     </>
   );
