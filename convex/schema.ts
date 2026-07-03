@@ -15,4 +15,9 @@ export default defineSchema({
     data: v.string(),
     savedAt: v.number(),
   }).index("by_user", ["userId", "savedAt"]),
+  // 개발 노트 > 개발 예정 백로그. JSON.stringify(BacklogItem[])
+  devBacklog: defineTable({
+    userId: v.id("users"),
+    data: v.string(),
+  }).index("by_user", ["userId"]),
 });

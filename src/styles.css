@@ -1951,6 +1951,74 @@ body.sb-resizing .app-shell {
 .vault-last-sync { margin-top: 10px; font-size: 14px; color: var(--muted); }
 .vault-hint-small { margin-top: 6px; font-size: 12.5px; color: var(--faint); }
 
+/* ── 개발 노트 ─────────────────────────────────────── */
+.devnote-tabs { display: flex; gap: 8px; margin: 4px 0 18px; }
+.devnote-tabs button {
+  padding: 9px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.devnote-tabs button.active { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
+.devlog { display: flex; flex-direction: column; gap: 18px; max-width: 860px; }
+.devlog-day { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; }
+.devlog-date { font-weight: 800; font-size: 15px; margin-bottom: 10px; }
+.devlog-date small { color: var(--faint); font-weight: 500; margin-left: 6px; }
+.devlog-day ul { margin: 0; padding-left: 4px; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.devlog-day li { font-size: 14px; line-height: 1.55; display: flex; gap: 8px; align-items: baseline; }
+.devlog-badge {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 7px;
+  text-transform: uppercase;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.devlog-badge.t-feat { background: var(--mint-soft); color: oklch(40% 0.1 165); }
+.devlog-badge.t-fix { background: var(--rose-soft); color: oklch(48% 0.12 15); }
+.devlog-badge.t-refactor { background: var(--sky-soft); color: oklch(42% 0.1 230); }
+.backlog { max-width: 860px; display: flex; flex-direction: column; gap: 8px; }
+.backlog-add { display: flex; gap: 8px; margin-bottom: 8px; }
+.backlog-add input {
+  flex: 1;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  font-size: 14px;
+}
+.backlog-add input:focus { border-color: var(--accent); outline: none; }
+.backlog-add button {
+  padding: 11px 20px;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+.backlog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 14px;
+}
+.backlog-row label { display: flex; align-items: center; gap: 10px; flex: 1; cursor: pointer; font-size: 14px; }
+.backlog-row input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); }
+.backlog-row.done span { text-decoration: line-through; color: var(--faint); }
+.backlog-suggested { font-style: normal; font-size: 11px; font-weight: 800; color: var(--accent); margin-right: 7px; }
+.backlog-del { color: var(--faint); font-size: 17px; padding: 2px 7px; border-radius: 8px; }
+.backlog-del:hover { color: oklch(50% 0.15 15); background: var(--rose-soft); }
+.backlog-loading { color: var(--muted); font-size: 14px; padding: 8px 2px; }
+
 .modal-overlay {
   position: fixed;
   inset: 0;

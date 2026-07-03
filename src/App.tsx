@@ -4,6 +4,7 @@ import { useQuery, useMutation, useConvexAuth, useConvex } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { CHANGELOG } from "./changelog";
 
 type AttachmentType = "doc" | "video" | "link";
 type ThemeName = "lavender" | "ocean" | "forest" | "sunset" | "rose" | "dark" | "dark-ocean" | "dark-forest" | "dark-warm";
@@ -1203,7 +1204,7 @@ function App() {
             <button className={`svt${view === "tree" ? " active" : ""}`} onClick={() => setView("tree")} title="트리 뷰">🌳</button>
             <button className={`svt${view === "graph" ? " active" : ""}`} onClick={() => setView("graph")} title="그래프 뷰">🕸️</button>
             <button className={`svt${view === "stats" ? " active" : ""}`} onClick={() => setView("stats")} title="통계">📊</button>
-            <button className={`svt${view === "profile" ? " active" : ""}`} onClick={() => setView("profile")} title="연동">🔗</button>
+            <button className={`svt${view === "profile" ? " active" : ""}`} onClick={() => setView("profile")} title="개발 노트">📓</button>
           </div>
         )}
         <button
@@ -2027,6 +2028,22 @@ function GraphView({ nodes: studyNodes, onNavigate }: { nodes: StudyNode[]; onNa
   );
 }
 
+// ── 개발 노트: 개발 예정 백로그 ──────────────────────────
+type BacklogItem = { id: string; text: string; done: boolean; createdAt: number; suggested?: boolean };
+
+// 첫 사용 시(서버에 백로그가 없을 때) 미리 채워주는 제안 목록.
+// 코드 점검 과정에서 발견된 개선 후보들 — 자유롭게 지우거나 완료 처리하면 된다.
+const SUGGESTED_BACKLOG: BacklogItem[] = [
+  { id: "sug-appstore", text: "앱스토어 출시 준비 — Capacitor 래핑 + 네이티브 소셜 로그인", done: false, createdAt: 0, suggested: true },
+  { id: "sug-split", text: "App.tsx 파일 분리 리팩토링 (4,000줄 → 에디터/동기화/모바일/데스크탑 모듈)", done: false, createdAt: 0, suggested: true },
+  { id: "sug-sync", text: "노트 단위 저장 구조로 전환 — 두 기기 동시 편집해도 충돌 없게", done: false, createdAt: 0, suggested: true },
+  { id: "sug-stats", text: "통계·그래프 뷰 모바일 지원 (데스크탑과 패리티)", done: false, createdAt: 0, suggested: true },
+  { id: "sug-pwa", text: "PWA 지원 — 홈 화면 설치 배너 + 오프라인에서도 열람", done: false, createdAt: 0, suggested: true },
+  { id: "sug-drag", text: "모바일에서 폴더/노트 순서 바꾸기 (터치 드래그)", done: false, createdAt: 0, suggested: true },
+  { id: "sug-import", text: "Obsidian → 앱 가져오기 (.md 파일 일괄 임포트)", done: false, createdAt: 0, suggested: true },
+  { id: "sug-highlight", text: "검색 결과에서 일치한 본문 구절 하이라이트", done: false, createdAt: 0, suggested: true },
+];
+
 function ProfileView({
   vaultSupported, vaultStatus, vaultHandleName, vaultLastSync, vaultError, vaultAutoSync,
   onConnectVault, onDisconnectVault, onSyncNowVault, onReconnectPermission, onToggleAutoSync
@@ -2051,9 +2068,97 @@ function ProfileView({
     : vaultStatus === "syncing" ? "동기화 중…"
     : "오류 발생";
 
+  const [tab, setTab] = useState<"log" | "todo" | "integrations">("log");
+
+  // 개발 예정 백로그: Convex 에 사용자별 JSON 하나로 동기화한다.
+  // 서버 첫 응답 전에는 저장하지 않는다(초기값이 서버를 덮어쓰지 않게).
+  const backlogServer = useQuery(api.backlog.get);
+  const saveBacklogMutation = useMutation(api.backlog.save);
+  const [backlog, setBacklog] = useState<BacklogItem[] | null>(null);
+  const [draft, setDraft] = useState("");
+  useEffect(() => {
+    if (backlogServer === undefined || backlog !== null) return;
+    if (backlogServer === null) { setBacklog(SUGGESTED_BACKLOG); return; }
+    try { setBacklog(JSON.parse(backlogServer) as BacklogItem[]); }
+    catch { setBacklog(SUGGESTED_BACKLOG); }
+  }, [backlogServer, backlog]);
+
+  const updateBacklog = (next: BacklogItem[]) => {
+    setBacklog(next);
+    saveBacklogMutation({ data: JSON.stringify(next) }).catch(() => {});
+  };
+  const addBacklogItem = () => {
+    const text = draft.trim();
+    if (!text || !backlog) return;
+    updateBacklog([{ id: id("b"), text, done: false, createdAt: Date.now() }, ...backlog]);
+    setDraft("");
+  };
+
   return (
     <>
-      <PageHead crumbs={[]} emoji="🔗" soft="var(--sky-soft)" title="연동 & 내보내기" subtitle="Obsidian 볼트 동기화와 노트 내보내기" onEmoji={() => {}} />
+      <PageHead crumbs={[]} emoji="📓" soft="var(--sky-soft)" title="개발 노트" subtitle="업데이트 기록 · 개발 예정 · 연동 (출시 전 개발자 화면)" onEmoji={() => {}} />
+      <div className="devnote-tabs">
+        <button className={tab === "log" ? "active" : ""} onClick={() => setTab("log")}>📜 업데이트 기록</button>
+        <button className={tab === "todo" ? "active" : ""} onClick={() => setTab("todo")}>
+          📋 개발 예정{backlog ? ` (${backlog.filter((b) => !b.done).length})` : ""}
+        </button>
+        <button className={tab === "integrations" ? "active" : ""} onClick={() => setTab("integrations")}>🔗 연동</button>
+      </div>
+
+      {tab === "log" && (
+        <div className="devlog">
+          {CHANGELOG.map((day) => (
+            <div className="devlog-day" key={day.date}>
+              <div className="devlog-date">{fmt(day.date)} <small>{day.date}</small></div>
+              <ul>
+                {day.items.map((item, i) => (
+                  <li key={i}>
+                    <span className={`devlog-badge t-${item.type}`}>{item.type}</span>
+                    {item.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "todo" && (
+        <div className="backlog">
+          <div className="backlog-add">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addBacklogItem(); }}
+              placeholder="개발할 기능이나 아이디어를 적고 Enter"
+            />
+            <button onClick={addBacklogItem}>추가</button>
+          </div>
+          {backlog === null ? (
+            <p className="backlog-loading">불러오는 중…</p>
+          ) : (
+            <>
+              {[...backlog.filter((b) => !b.done), ...backlog.filter((b) => b.done)].map((item) => (
+                <div className={`backlog-row ${item.done ? "done" : ""}`} key={item.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={item.done}
+                      onChange={() => updateBacklog(backlog.map((b) => b.id === item.id ? { ...b, done: !b.done } : b))}
+                    />
+                    <span>{item.suggested && <em className="backlog-suggested">💡 제안</em>}{item.text}</span>
+                  </label>
+                  <button className="backlog-del" onClick={() => updateBacklog(backlog.filter((b) => b.id !== item.id))}>×</button>
+                </div>
+              ))}
+              {backlog.length === 0 && <p className="backlog-loading">아직 항목이 없어요 — 위에 첫 아이디어를 적어보세요</p>}
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === "integrations" && (
+      <>
       <h2 className="section-title">📂 Obsidian 볼트 폴더 동기화</h2>
       <div className="profile-grid">
         <div className="info-card vault-card">
@@ -2101,6 +2206,8 @@ function ProfileView({
       <div className="profile-grid">
         <InfoCard title="실시간 동기화" value="Convex 서버" body="로그인하면 모든 데이터가 서버에 실시간 저장되고 모든 기기에 즉시 반영됩니다. 저장 시점마다 서버에 이력이 남고, 전체 백업·복구는 ⚙️ 설정 > 데이터 백업·복구에서 할 수 있어요." />
       </div>
+      </>
+      )}
     </>
   );
 }
