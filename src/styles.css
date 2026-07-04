@@ -162,7 +162,7 @@
   --ease-pop: cubic-bezier(.34, 1.56, .64, 1);
   --sb-w: 300px;
   --nav-font-size: 16px;
-  --body-font-size: 14px;
+  --body-font-size: 18px;
   --title-font-size: 30px;
   --font: "Pretendard Variable", Pretendard, -apple-system, system-ui, sans-serif;
   --font-cute: "Jua", "Pretendard Variable", Pretendard, system-ui, sans-serif;
@@ -3353,10 +3353,36 @@ body.sb-resizing .app-shell {
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 5px;
-  pointer-events: none;
+  cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  transition: background .12s, color .12s;
 }
+.tb-fs-badge:hover { background: var(--accent-soft); color: var(--accent); }
+.tb-fs-badge.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+
+/* ── 글씨 크기 피커 ───────────────────────── */
+.fs-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex-wrap: wrap;
+}
+.fs-pick-item.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.fs-pick-input {
+  width: 80px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--fg);
+  outline: none;
+}
+.fs-pick-input:focus { border-color: var(--accent); }
 
 /* ── HR 피커 ───────────────────────── */
 .hr-picker {

@@ -9,6 +9,7 @@ export const CHANGELOG: ChangelogDay[] = [
     { type: "feat", text: "노트 본문에 이미지 삽입 기능 추가 — 텍스트 앞뒤로 이미지 배치 가능" },
     { type: "feat", text: "클립보드 이미지(캡쳐 등) Ctrl+V로 노트 본문에 바로 붙여넣기 지원" },
     { type: "fix", text: "노트 모달 크기를 화면 세로 90% · 가로 80%로 확대" },
+    { type: "feat", text: "기본 본문 글씨 크기 18px로 확대 + 툴바 글씨 크기 배지를 클릭해 바로 선택 가능하게 변경" },
   ] },
   { date: "2026-07-03", items: [
     { type: "refactor", text: "'연동 & 내보내기' 화면 정리 — 기능·안내 구분, 미구현 설명 삭제" },

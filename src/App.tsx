@@ -374,7 +374,7 @@ const defaultSettings: Settings = {
   font: "pretendard",
   sidebarWidth: 300,
   navSize: 16,
-  bodySize: 16,
+  bodySize: 18,
   titleSize: 30,
   obsidianVault: "",
   vaultAutoSync: false
@@ -3229,6 +3229,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertIm
 }) {
   const [showLinkPicker, setShowLinkPicker] = useState(false);
   const [showHrPicker, setShowHrPicker] = useState(false);
+  const [showFsPicker, setShowFsPicker] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
   const [curFontSize, setCurFontSize] = useState<number | null>(null);
   const imgInputRef = useRef<HTMLInputElement | null>(null);
@@ -3267,6 +3268,13 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertIm
   const changeFontSize = (delta: number) => {
     focus();
     if (divRef.current && adjustFontSize(divRef.current, delta)) sync();
+  };
+
+  // 배지에 표시된 현재 크기 대비 목표 크기의 차이를 구해 그 자리에서 바로 적용한다.
+  const applyFontSize = (target: number) => {
+    if (curFontSize == null || target === curFontSize) { setShowFsPicker(false); return; }
+    changeFontSize(target - curFontSize);
+    setShowFsPicker(false);
   };
 
   const insertHr = (type: 'solid' | 'dashed' | 'dotted' | 'double' | 'deco') => {
@@ -3313,7 +3321,14 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertIm
         <button type="button" className="tb" title="취소선" onClick={() => exec('strikeThrough')}><s>S</s></button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="글씨 크게 (Ctrl+Shift+>)" onClick={() => changeFontSize(2)}><b>A+</b></button>
-        {curFontSize !== null && <span className="tb-fs-badge">{curFontSize}px</span>}
+        {curFontSize !== null && (
+          <button
+            type="button"
+            className={`tb-fs-badge${showFsPicker ? ' active' : ''}`}
+            title="글씨 크기 선택"
+            onClick={() => { setShowFsPicker(v => !v); setShowHrPicker(false); setShowLinkPicker(false); }}
+          >{curFontSize}px</button>
+        )}
         <button type="button" className="tb" title="글씨 작게 (Ctrl+Shift+<)" onClick={() => changeFontSize(-2)}><small>a−</small></button>
         <span className="tb-sep" />
         <button type="button" className="tb" title="제목 1" onClick={() => exec('formatBlock', 'h1')}>H1</button>
@@ -3329,7 +3344,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertIm
           type="button"
           className={`tb${showHrPicker ? ' active' : ''}`}
           title="구분선"
-          onClick={() => { setShowHrPicker(v => !v); setShowLinkPicker(false); }}
+          onClick={() => { setShowHrPicker(v => !v); setShowLinkPicker(false); setShowFsPicker(false); }}
         >—▾</button>
         <button type="button" className="tb" title="표 삽입" onClick={() => insertHtml(
           '<table class="md-table"><thead><tr><th>제목1</th><th>제목2</th><th>제목3</th></tr></thead>' +
@@ -3344,7 +3359,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertIm
           type="button"
           className={`tb tb-link${showLinkPicker ? ' active' : ''}`}
           title="노트 링크 [[]]"
-          onClick={() => { setShowLinkPicker(v => !v); setShowHrPicker(false); }}
+          onClick={() => { setShowLinkPicker(v => !v); setShowHrPicker(false); setShowFsPicker(false); }}
         >🔗 [[]]</button>
       </div>
       {showHrPicker && (
@@ -3354,6 +3369,31 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertIm
           <button type="button" className="hr-pick-item" onClick={() => insertHr('dotted')}><span className="hr-preview hr-dotted" />점</button>
           <button type="button" className="hr-pick-item" onClick={() => insertHr('double')}><span className="hr-preview hr-double" />이중선</button>
           <button type="button" className="hr-pick-item" onClick={() => insertHr('deco')}>✦ 장식선</button>
+        </div>
+      )}
+      {showFsPicker && curFontSize !== null && (
+        <div className="fs-picker">
+          {[12, 14, 16, 18, 20, 24, 28, 32].map(sz => (
+            <button
+              key={sz}
+              type="button"
+              className={`hr-pick-item fs-pick-item${curFontSize === sz ? ' active' : ''}`}
+              onClick={() => applyFontSize(sz)}
+            >{sz}px</button>
+          ))}
+          <input
+            type="number"
+            className="fs-pick-input"
+            min={8}
+            max={80}
+            placeholder="직접 입력"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              const v = parseInt((e.target as HTMLInputElement).value, 10);
+              if (v > 0) applyFontSize(v);
+            }}
+          />
         </div>
       )}
       {showLinkPicker && (
