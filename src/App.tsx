@@ -3220,20 +3220,19 @@ function adjustFontSize(root: HTMLElement, delta: number): boolean {
   return true;
 }
 
-function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
+function WysiwygToolbar({ divRef, sync, allEntryTitles, uploadingImg, onInsertImage }: {
   divRef: React.RefObject<HTMLDivElement | null>;
   sync: () => void;
   allEntryTitles?: string[];
+  uploadingImg: boolean;
+  onInsertImage: (file: File, savedRange: Range | null) => void;
 }) {
   const [showLinkPicker, setShowLinkPicker] = useState(false);
   const [showHrPicker, setShowHrPicker] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
   const [curFontSize, setCurFontSize] = useState<number | null>(null);
-  const [uploadingImg, setUploadingImg] = useState(false);
   const imgInputRef = useRef<HTMLInputElement | null>(null);
   const savedRangeRef = useRef<Range | null>(null);
-  const convex = useConvex();
-  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
 
   useEffect(() => {
     const update = () => {
@@ -3283,7 +3282,7 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
   };
 
   // 파일 선택창을 열기 전, 현재 커서 위치를 기억해 둔다.
-  // 업로드가 끝날 때쯤엔 선택 영역이 사라져 있으므로 나중에 복원해서 그 자리에 삽입한다.
+  // 선택창이 열려 있는 동안·업로드하는 동안 선택 영역이 사라질 수 있으므로 나중에 복원해서 그 자리에 삽입한다.
   const openImagePicker = () => {
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0 && divRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
@@ -3294,31 +3293,10 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
     imgInputRef.current?.click();
   };
 
-  const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { alert('이미지 파일만 삽입할 수 있습니다'); return; }
-    setUploadingImg(true);
-    try {
-      const uploadUrl = await generateUploadUrl();
-      const res = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
-      if (!res.ok) throw new Error('upload failed');
-      const { storageId } = await res.json();
-      const url = await convex.query(api.files.getUrl, { storageId });
-      if (!url) throw new Error('no url');
-      focus();
-      const sel = window.getSelection();
-      if (sel && savedRangeRef.current) {
-        sel.removeAllRanges();
-        sel.addRange(savedRangeRef.current);
-      }
-      insertHtml(`<img class="md-img" src="${esc(url)}" alt="">&nbsp;`);
-    } catch {
-      alert('이미지 업로드에 실패했습니다');
-    } finally {
-      setUploadingImg(false);
-    }
+    if (file) onInsertImage(file, savedRangeRef.current);
   };
 
   const filteredTitles = (allEntryTitles ?? [])
@@ -3415,6 +3393,36 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
   const [tableCtx, setTableCtx] = useState<{ table: HTMLElement; td: HTMLElement; x: number; y: number } | null>(null);
   const [preCtx, setPreCtx] = useState<{ el: HTMLElement; x: number; y: number } | null>(null);
   const colResizeRef = useRef<{ ths: HTMLElement[]; idx: number; startX: number; startWidths: number[] } | null>(null);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const convex = useConvex();
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
+
+  // 이미지 파일을 Convex Storage에 업로드하고 그 URL을 커서(또는 저장해 둔 위치)에 삽입한다.
+  // 툴바의 이미지 버튼과 클립보드 붙여넣기(Ctrl+V) 양쪽에서 공용으로 쓴다.
+  const uploadAndInsertImage = async (file: File, savedRange: Range | null) => {
+    if (!file.type.startsWith('image/')) { alert('이미지 파일만 삽입할 수 있습니다'); return; }
+    setUploadingImg(true);
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const res = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+      if (!res.ok) throw new Error('upload failed');
+      const { storageId } = await res.json();
+      const url = await convex.query(api.files.getUrl, { storageId });
+      if (!url) throw new Error('no url');
+      divRef.current?.focus();
+      const sel = window.getSelection();
+      if (sel && savedRange) {
+        sel.removeAllRanges();
+        sel.addRange(savedRange);
+      }
+      document.execCommand('insertHTML', false, `<img class="md-img" src="${esc(url)}" alt="">&nbsp;`);
+      sync();
+    } catch {
+      alert('이미지 업로드에 실패했습니다');
+    } finally {
+      setUploadingImg(false);
+    }
+  };
 
   useEffect(() => {
     const close = (e: Event) => {
@@ -3742,6 +3750,16 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    // 스크린샷 등 클립보드에 이미지가 담겨 있으면(예: 캡쳐 후 Ctrl+V) 텍스트 대신 이미지로 삽입한다.
+    const imageItem = Array.from(e.clipboardData.items ?? []).find(it => it.kind === 'file' && it.type.startsWith('image/'));
+    if (imageItem) {
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      const sel = window.getSelection();
+      const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+      if (file) void uploadAndInsertImage(file, range);
+      return;
+    }
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
     if (text) {
@@ -3795,7 +3813,13 @@ function WysiwygEditor({ value, onChange, placeholder, onWikiLink, allEntryTitle
 
   return (
     <div className="wysiwyg-wrap">
-      <WysiwygToolbar divRef={divRef} sync={sync} allEntryTitles={allEntryTitles} />
+      <WysiwygToolbar
+        divRef={divRef}
+        sync={sync}
+        allEntryTitles={allEntryTitles}
+        uploadingImg={uploadingImg}
+        onInsertImage={(file, range) => void uploadAndInsertImage(file, range)}
+      />
       <div
         ref={divRef}
         contentEditable
