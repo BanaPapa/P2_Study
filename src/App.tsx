@@ -2775,7 +2775,7 @@ function ConfirmDeleteModal({ node, onClose, onConfirm }: {
   );
 }
 
-type InlineToken = string | { kind: 'strong' | 'em' | 'del' | 'code' | 'wiki' | 'big' | 'small'; text: string } | { kind: 'fs'; text: string; size: number };
+type InlineToken = string | { kind: 'strong' | 'em' | 'del' | 'code' | 'wiki' | 'big' | 'small'; text: string } | { kind: 'fs'; text: string; size: number } | { kind: 'img'; alt: string; src: string };
 
 // 같은 줄에서 짝을 못 찾아 일반 텍스트로 남은 서식 태그({fs:12}, {/fs} 등)를 제거한다.
 // 과거 버그로 여는 태그와 닫는 태그가 서로 다른 줄에 저장된 노트가 자연 복구되도록 한다.
@@ -2800,6 +2800,7 @@ function mdToSummaryLines(md: string, maxLines: number): string[] {
       .replace(/^[-*]\s+\[[x ]\]\s+/i, '')  // 체크박스
       .replace(/^[-*]\s+/, '')              // 목록
       .replace(/^\d+\.\s+/, '')             // 번호 목록
+      .replace(/!\[(.*?)\]\(.*?\)/g, (_m, alt) => alt || '📷 이미지')
       .replace(/\*\*(.+?)\*\*/g, '$1')
       .replace(/\*([^*]+?)\*/g, '$1')
       .replace(/~~(.+?)~~/g, '$1')
@@ -2816,24 +2817,26 @@ function parseInline(text: string, onWiki?: (title: string) => void): JSX.Elemen
   const tokens: InlineToken[] = [];
   // 기울임은 \*([^*]+?)\* 로 제한: 별표만 남은 잔해('**','***')가 기울임으로
   // 오인 매칭되어 저장할 때마다 별표 개수가 변형되는 것을 막는다.
-  const re = /\*\*(.+?)\*\*|\*([^*]+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
+  const re = /!\[(.*?)\]\((.*?)\)|\*\*(.+?)\*\*|\*([^*]+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let last = 0, m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) tokens.push(stripOrphanTags(text.slice(last, m.index)));
-    if (m[1] !== undefined) tokens.push({ kind: 'strong', text: m[1] });
-    else if (m[2] !== undefined) tokens.push({ kind: 'em', text: m[2] });
-    else if (m[3] !== undefined) tokens.push({ kind: 'del', text: m[3] });
-    else if (m[4] !== undefined) tokens.push({ kind: 'code', text: m[4] });
-    else if (m[5] !== undefined) tokens.push({ kind: 'wiki', text: m[5] });
-    else if (m[6] !== undefined) tokens.push({ kind: 'big', text: m[6] });
-    else if (m[7] !== undefined) tokens.push({ kind: 'small', text: m[7] });
-    else if (m[8] !== undefined) tokens.push({ kind: 'fs', text: m[9] ?? '', size: parseInt(m[8], 10) });
+    if (m[1] !== undefined) tokens.push({ kind: 'img', alt: m[1], src: m[2] ?? '' });
+    else if (m[3] !== undefined) tokens.push({ kind: 'strong', text: m[3] });
+    else if (m[4] !== undefined) tokens.push({ kind: 'em', text: m[4] });
+    else if (m[5] !== undefined) tokens.push({ kind: 'del', text: m[5] });
+    else if (m[6] !== undefined) tokens.push({ kind: 'code', text: m[6] });
+    else if (m[7] !== undefined) tokens.push({ kind: 'wiki', text: m[7] });
+    else if (m[8] !== undefined) tokens.push({ kind: 'big', text: m[8] });
+    else if (m[9] !== undefined) tokens.push({ kind: 'small', text: m[9] });
+    else if (m[10] !== undefined) tokens.push({ kind: 'fs', text: m[11] ?? '', size: parseInt(m[10], 10) });
     last = m.index + m[0].length;
   }
   if (last < text.length) tokens.push(stripOrphanTags(text.slice(last)));
   return (
     <>{tokens.map((t, i) => {
       if (typeof t === 'string') return <span key={i}>{t}</span>;
+      if (t.kind === 'img') return <img key={i} className="md-img" src={t.src} alt={t.alt} />;
       if (t.kind === 'strong') return <strong key={i}>{parseInline(t.text, onWiki)}</strong>;
       if (t.kind === 'em') return <em key={i}>{parseInline(t.text, onWiki)}</em>;
       if (t.kind === 'del') return <del key={i}>{parseInline(t.text, onWiki)}</del>;
@@ -2864,20 +2867,21 @@ function esc(s: string) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').
 function inlineMdToHtml(text: string): string {
   // 기울임은 \*([^*]+?)\* 로 제한: 별표만 남은 잔해('**','***')가 기울임으로
   // 오인 매칭되어 저장할 때마다 별표 개수가 변형되는 것을 막는다.
-  const re = /\*\*(.+?)\*\*|\*([^*]+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
+  const re = /!\[(.*?)\]\((.*?)\)|\*\*(.+?)\*\*|\*([^*]+?)\*|~~(.+?)~~|`(.+?)`|\[\[(.+?)\]\]|\{big\}(.+?)\{\/big\}|\{small\}(.+?)\{\/small\}|\{fs:(\d+)\}(.+?)\{\/fs\}/g;
   let result = '';
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     result += esc(stripOrphanTags(text.slice(last, m.index)));
-    if (m[1] !== undefined) result += `<strong>${inlineMdToHtml(m[1])}</strong>`;
-    else if (m[2] !== undefined) result += `<em>${inlineMdToHtml(m[2])}</em>`;
-    else if (m[3] !== undefined) result += `<del>${inlineMdToHtml(m[3])}</del>`;
-    else if (m[4] !== undefined) result += `<code class="md-ic">${esc(m[4])}</code>`;
-    else if (m[5] !== undefined) result += `<span class="md-wiki">${esc(m[5])}</span>`;
-    else if (m[6] !== undefined) result += `<span class="md-fs" style="font-size:19px">${inlineMdToHtml(m[6])}</span>`;
-    else if (m[7] !== undefined) result += `<span class="md-fs" style="font-size:11px">${inlineMdToHtml(m[7])}</span>`;
-    else if (m[8] !== undefined) result += `<span class="md-fs" style="font-size:${m[8]}px">${inlineMdToHtml(m[9] ?? '')}</span>`;
+    if (m[1] !== undefined) result += `<img class="md-img" src="${esc(m[2] ?? '')}" alt="${esc(m[1])}">`;
+    else if (m[3] !== undefined) result += `<strong>${inlineMdToHtml(m[3])}</strong>`;
+    else if (m[4] !== undefined) result += `<em>${inlineMdToHtml(m[4])}</em>`;
+    else if (m[5] !== undefined) result += `<del>${inlineMdToHtml(m[5])}</del>`;
+    else if (m[6] !== undefined) result += `<code class="md-ic">${esc(m[6])}</code>`;
+    else if (m[7] !== undefined) result += `<span class="md-wiki">${esc(m[7])}</span>`;
+    else if (m[8] !== undefined) result += `<span class="md-fs" style="font-size:19px">${inlineMdToHtml(m[8])}</span>`;
+    else if (m[9] !== undefined) result += `<span class="md-fs" style="font-size:11px">${inlineMdToHtml(m[9])}</span>`;
+    else if (m[10] !== undefined) result += `<span class="md-fs" style="font-size:${m[10]}px">${inlineMdToHtml(m[11] ?? '')}</span>`;
     last = m.index + m[0].length;
   }
   return result + esc(stripOrphanTags(text.slice(last)));
@@ -2985,6 +2989,10 @@ function nodeToMd(node: Node): string {
       return `---${ws}`;
     }
     case 'br': return '';
+    case 'img': {
+      const imgEl = el as HTMLImageElement;
+      return `![${imgEl.getAttribute('alt') ?? ''}](${imgEl.getAttribute('src') ?? ''})`;
+    }
     case 'ul': return Array.from(el.querySelectorAll(':scope > li')).map(li => `- ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
     case 'ol': return Array.from(el.querySelectorAll(':scope > li')).map((li, idx) => `${idx + 1}. ${Array.from(li.childNodes).map(nodeToMd).join('')}`).join('\n');
     case 'pre': {
@@ -3221,6 +3229,11 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
   const [showHrPicker, setShowHrPicker] = useState(false);
   const [linkSearch, setLinkSearch] = useState('');
   const [curFontSize, setCurFontSize] = useState<number | null>(null);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const imgInputRef = useRef<HTMLInputElement | null>(null);
+  const savedRangeRef = useRef<Range | null>(null);
+  const convex = useConvex();
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
 
   useEffect(() => {
     const update = () => {
@@ -3269,6 +3282,45 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
     setLinkSearch('');
   };
 
+  // 파일 선택창을 열기 전, 현재 커서 위치를 기억해 둔다.
+  // 업로드가 끝날 때쯤엔 선택 영역이 사라져 있으므로 나중에 복원해서 그 자리에 삽입한다.
+  const openImagePicker = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && divRef.current?.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      savedRangeRef.current = sel.getRangeAt(0).cloneRange();
+    } else {
+      savedRangeRef.current = null;
+    }
+    imgInputRef.current?.click();
+  };
+
+  const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('이미지 파일만 삽입할 수 있습니다'); return; }
+    setUploadingImg(true);
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const res = await fetch(uploadUrl, { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+      if (!res.ok) throw new Error('upload failed');
+      const { storageId } = await res.json();
+      const url = await convex.query(api.files.getUrl, { storageId });
+      if (!url) throw new Error('no url');
+      focus();
+      const sel = window.getSelection();
+      if (sel && savedRangeRef.current) {
+        sel.removeAllRanges();
+        sel.addRange(savedRangeRef.current);
+      }
+      insertHtml(`<img class="md-img" src="${esc(url)}" alt="">&nbsp;`);
+    } catch {
+      alert('이미지 업로드에 실패했습니다');
+    } finally {
+      setUploadingImg(false);
+    }
+  };
+
   const filteredTitles = (allEntryTitles ?? [])
     .filter(t => t.toLowerCase().includes(linkSearch.toLowerCase()))
     .slice(0, 12);
@@ -3305,6 +3357,10 @@ function WysiwygToolbar({ divRef, sync, allEntryTitles }: {
           '<table class="md-table"><thead><tr><th>제목1</th><th>제목2</th><th>제목3</th></tr></thead>' +
           '<tbody><tr><td>내용1</td><td>내용2</td><td>내용3</td></tr></tbody></table><p><br></p>'
         )}>⊞</button>
+        <button type="button" className="tb" title="이미지 삽입" disabled={uploadingImg} onClick={openImagePicker}>
+          {uploadingImg ? '⏳' : '🖼'}
+        </button>
+        <input ref={imgInputRef} type="file" accept="image/*" hidden onChange={handleImageSelected} />
         <span className="tb-sep" />
         <button
           type="button"

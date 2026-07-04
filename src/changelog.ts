@@ -5,6 +5,9 @@ export type ChangeType = 'feat' | 'fix' | 'refactor' | 'ci' | 'docs' | 'chore' |
 export type ChangelogDay = { date: string; items: { type: ChangeType; text: string }[] };
 
 export const CHANGELOG: ChangelogDay[] = [
+  { date: "2026-07-05", items: [
+    { type: "feat", text: "노트 본문에 이미지 삽입 기능 추가 — 텍스트 앞뒤로 이미지 배치 가능" },
+  ] },
   { date: "2026-07-03", items: [
     { type: "refactor", text: "'연동 & 내보내기' 화면 정리 — 기능·안내 구분, 미구현 설명 삭제" },
     { type: "feat", text: "개발 노트 화면 신설 — 업데이트 기록 타임라인 + 개발 예정 백로그 탭" },

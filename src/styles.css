@@ -3599,6 +3599,8 @@ body.sb-resizing .app-shell {
 .wysiwyg-editor table { border-collapse: collapse; width: 100%; margin: 6px 0; font-size: 0.93em; table-layout: fixed; }
 .wysiwyg-editor th { background: var(--surface-2); font-weight: 600; }
 .wysiwyg-editor td, .wysiwyg-editor th { border: 1px solid var(--border); padding: 4px 10px; }
+.wysiwyg-editor .md-img, .md-preview .md-img { max-width: 100%; border-radius: 8px; margin: 4px 0; vertical-align: middle; }
+.wysiwyg-editor .md-img { cursor: default; }
 .tb-link.active { background: var(--accent-soft); color: var(--accent); }
 .link-picker {
   background: var(--surface);

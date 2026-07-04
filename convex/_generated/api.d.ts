@@ -10,6 +10,7 @@
 
 import type * as auth from "../auth.js";
 import type * as backlog from "../backlog.js";
+import type * as files from "../files.js";
 import type * as http from "../http.js";
 import type * as nodes from "../nodes.js";
 
@@ -22,6 +23,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   backlog: typeof backlog;
+  files: typeof files;
   http: typeof http;
   nodes: typeof nodes;
 }>;
